@@ -59,4 +59,9 @@ class Feature(Protocol):
 
 
 def home_button(context: Context) -> list[Button]:
-    return [Button(context.tr("Все сценарии", "All scenarios"), "home")]
+    label = (
+        context.tr("Главное меню", "Main menu")
+        if context.settings.default_module
+        else context.tr("Все сценарии", "All scenarios")
+    )
+    return [Button(label, "home")]

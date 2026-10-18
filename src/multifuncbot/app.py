@@ -87,7 +87,8 @@ def build_application(settings: Settings) -> Application:
             await update.callback_query.answer()
             screen = router.action(user_id, chat_id, update.callback_query.data or "")
         elif update.message and update.message.text:
-            command = update.message.text.split()[0].split("@")[0]
+            words = update.message.text.split(maxsplit=1)
+            command = words[0].split("@")[0] if words else ""
             if command == "/start":
                 screen = router.start(user_id, chat_id)
             elif command == "/language":

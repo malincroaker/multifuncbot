@@ -3,7 +3,7 @@
 from multifuncbot.core.config import Settings
 from multifuncbot.core.database import Database
 from multifuncbot.core.errors import DomainError
-from multifuncbot.core.models import Button, Context, Screen
+from multifuncbot.core.models import Button, Context, Screen, home_button
 from multifuncbot.core.registry import load_features
 
 
@@ -117,6 +117,6 @@ class Router:
             error.message(ctx.language),
             [
                 [Button(ctx.tr("Продолжить", "Continue"), f"{name}:resume")],
-                [Button(ctx.tr("Все сценарии", "All scenarios"), "home")],
+                home_button(ctx),
             ],
         )
