@@ -5,3 +5,6 @@
 *.css text eol=lf
 *.html text eol=lf
 *.pdf binary
+*.png binary
+*.svg text eol=lf
+*.lock text eol=lf
