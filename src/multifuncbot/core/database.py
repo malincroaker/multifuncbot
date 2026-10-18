@@ -19,6 +19,12 @@ class Database:
                 namespace TEXT NOT NULL, data TEXT NOT NULL,
                 PRIMARY KEY (user_id, chat_id, namespace)
             );
+            CREATE TABLE IF NOT EXISTS outbox (
+                id INTEGER PRIMARY KEY, recipient_id INTEGER NOT NULL,
+                event_key TEXT NOT NULL, message TEXT NOT NULL,
+                delivered INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
+                retry_at REAL NOT NULL DEFAULT 0, UNIQUE(recipient_id,event_key)
+            );
         """)
 
     @contextmanager

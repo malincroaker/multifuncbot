@@ -121,14 +121,19 @@ class Shop:
             )
         return Screen(text, [home_button(ctx)])
 
-    def order_screen(self, ctx, order):
+    def order_screen(self, ctx, order, *, admin=False):
         text = f"#{order['id'][:8]} · {order['total'] // 100} ₽\n"
         text += ctx.tr(*STATUSES[order["status"]])
+        text += f"\n{order['customer_name']} · {order['contact']}"
+        for line in order["lines"]:
+            text += f"\n{line['title'][ctx.language]} × {line['quantity']}"
+        if order["fulfillment"] == "delivery":
+            text += f"\n{order['address']}"
         text += ctx.tr(
             "\n\nДемонстрация. Деньги не списываются.", "\n\nDemonstration. No money is charged."
         )
         rows = []
-        if order["status"] in ("awaiting_payment", "payment_failed"):
+        if not admin and order["status"] in ("awaiting_payment", "payment_failed"):
             for label, en, outcome in (
                 ("Успешная оплата", "Successful payment", "success"),
                 ("Отказ оплаты", "Payment failure", "failure"),
@@ -179,6 +184,10 @@ class Shop:
             return self.order_screen(ctx, order)
         if command == "order":
             return self.order_screen(ctx, self.service.get_order(ctx.tenant, ctx.user_id, value))
+        if command == "adminorder":
+            if not ctx.can_admin:
+                raise DomainError("Нет доступа.", "Access denied.")
+            return self.order_screen(ctx, self.service.admin_order(ctx.tenant, value), admin=True)
         if command in ("orders", "admin"):
             if command == "admin" and not ctx.can_admin:
                 raise DomainError("Нет доступа.", "Access denied.")
@@ -194,7 +203,7 @@ class Shop:
                         Button(
                             f"#{order['id'][:8]} · {order['total'] // 100} ₽ · "
                             + ctx.tr(*STATUSES[order["status"]]),
-                            f"shop:order:{order['id']}",
+                            f"shop:{'adminorder' if command == 'admin' else 'order'}:{order['id']}",
                         )
                     ]
                     for order in orders
@@ -218,4 +227,4 @@ class Shop:
 
 
 def create(db, settings):
-    return Shop(ShopService(db))
+    return Shop(ShopService(db, settings))

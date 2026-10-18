@@ -139,4 +139,4 @@ class Leads:
 
 
 def create(db, settings):
-    return Leads(LeadService(db))
+    return Leads(LeadService(db, settings))

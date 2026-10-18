@@ -15,6 +15,7 @@ from telegram.ext import (
 from multifuncbot.core.config import Settings
 from multifuncbot.core.database import Database
 from multifuncbot.core.models import Screen
+from multifuncbot.core.notifications import pending, record_delivery
 from multifuncbot.core.router import Router
 
 LOGGER = logging.getLogger(__name__)
@@ -64,6 +65,17 @@ def build_application(settings: Settings) -> Application:
 
     if "booking" in router.features:
         application.job_queue.run_repeating(reminders, interval=60, first=10)
+
+    async def notifications(context):
+        for item in pending(db):
+            try:
+                await context.bot.send_message(item["recipient_id"], item["message"])
+                record_delivery(db, item["id"], success=True)
+            except TelegramError:
+                record_delivery(db, item["id"], success=False)
+                LOGGER.warning("Notification delivery failed; retry recorded")
+
+    application.job_queue.run_repeating(notifications, interval=15, first=5)
 
     async def handle(update: Update, context):
         if not update.effective_user or not update.effective_chat:

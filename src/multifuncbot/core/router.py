@@ -28,6 +28,7 @@ class Router:
         )
 
     def menu(self, ctx: Context) -> Screen:
+        self.leave(ctx)
         ctx.save("navigation", {})
         return Screen(
             ctx.tr(
@@ -46,11 +47,20 @@ class Router:
     def enter(self, ctx: Context, name: str) -> Screen:
         if name not in self.features:
             return self.menu(ctx)
+        self.leave(ctx)
         ctx.save("navigation", {"active": name})
         return self.features[name].start(ctx)
 
+    def leave(self, ctx: Context):
+        active = ctx.state("navigation").get("active")
+        if active in self.features and not getattr(
+            self.features[active], "retain_state_on_exit", False
+        ):
+            ctx.save(active, {})
+
     def start(self, user_id: int, chat_id: int) -> Screen:
         ctx = self.context(user_id, chat_id)
+        self.leave(ctx)
         ctx.save("navigation", {})
         if not self.db.language(user_id):
             return self.language_menu()

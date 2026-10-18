@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f6f3ec">
+  <title>Место · Multifuncbot shop</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="demo-strip" id="demo-strip">Демо-магазин · Настоящие деньги не списываются</div>
+  <div class="app-shell">
+    <header class="header">
+      <a class="brand" href="/" aria-label="Место, главная"><span class="brand-mark">м.</span><span id="brand-name">место</span></a>
+      <nav aria-label="Shop navigation">
+        <button id="orders-button" class="text-button" type="button">Заказы</button>
+        <button id="language-button" class="language-button" type="button" aria-label="Switch language">EN</button>
+        <button id="cart-button" class="cart-button" type="button">Корзина <span id="cart-count">0</span></button>
+      </nav>
+    </header>
+    <div id="error-banner" class="error-banner" role="alert" hidden></div>
+    <main>
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow" id="hero-label">Для рабочего стола и не только</p>
+          <h1 id="hero-title">Место для<br>хороших идей.</h1>
+          <p id="hero-description">Блокноты, любимая кружка и маленькие вещи, с которых начинается большой план.</p>
+          <a class="hero-link" href="#catalog" id="hero-link">Найти своё →</a>
+        </div>
+        <button class="hero-art" id="hero-product" type="button" aria-label="Открыть блокнот Точка">
+          <img src="/images/notebook.svg" alt="Блокнот в мягкой зелёной обложке" width="380" height="300">
+          <span class="hero-caption" id="hero-caption">Блокнот «Точка» <strong>890 ₽ ↗</strong></span>
+        </button>
+      </section>
+      <section id="catalog" class="catalog" aria-labelledby="catalog-title">
+        <div class="section-heading"><h2 id="catalog-title">Хорошие вещи на каждый день</h2><span id="product-count">6 предметов</span></div>
+        <div class="catalog-tools">
+          <div class="categories" id="categories" aria-label="Категории"></div>
+          <label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" maxlength="80" placeholder="Найти вещь" aria-label="Поиск по каталогу"></label>
+        </div>
+        <div id="products" class="product-grid" aria-live="polite"><p class="muted">Загружаем каталог…</p></div>
+      </section>
+      <section id="orders-section" class="orders-section" hidden aria-labelledby="orders-title">
+        <div class="section-heading"><h2 id="orders-title">Мои заказы</h2><button class="text-button" id="back-catalog" type="button">К каталогу →</button></div>
+        <div id="orders-list"></div>
+      </section>
+      <section class="delivery-note"><span class="note-mark" aria-hidden="true">↗</span><div><h2 id="delivery-title">Собрали. Проверили. Отправили.</h2><p id="delivery-copy">Демо-доставка — 300 ₽, от 3 000 ₽ бесплатно. Самовывоз — бесплатно. Все товары и заказы вымышленные.</p></div></section>
+    </main>
+    <footer><span id="footer-brand">место · Демо от Multifuncbot</span><span id="footer-note">Небольшие вещи. Большие планы.</span></footer>
+  </div>
+  <button id="floating-cart" class="floating-cart" type="button" hidden><span id="floating-label">Корзина</span><span id="floating-total">0 ₽ →</span></button>
+  <dialog id="shop-dialog" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title"></h2><button id="close-dialog" class="close-button" type="button" aria-label="Закрыть">×</button></div><div id="dialog-body"></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <noscript><p>Для каталога и корзины нужен JavaScript. / JavaScript is required for this shop.</p></noscript>
+</body>
+</html>

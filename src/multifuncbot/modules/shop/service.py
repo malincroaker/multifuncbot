@@ -5,6 +5,7 @@ import re
 from uuid import uuid4
 
 from multifuncbot.core.errors import DomainError
+from multifuncbot.core.notifications import enqueue
 from multifuncbot.integrations.payments.demo import DemoPayments
 from multifuncbot.modules.shop.catalog import PRODUCTS
 
@@ -29,8 +30,9 @@ def customer_field(field, value):
 
 
 class ShopService:
-    def __init__(self, db):
+    def __init__(self, db, settings=None):
         self.db = db
+        self.settings = settings
         self.payments = DemoPayments()
         db.initialize("""
             CREATE TABLE IF NOT EXISTS carts (
@@ -152,6 +154,17 @@ class ShopService:
             connection.execute(
                 "DELETE FROM carts WHERE tenant=? AND owner_id=?", (tenant, owner_id)
             )
+            if self.settings and self.settings.app_mode == "business":
+                for recipient in self.settings.admin_ids:
+                    enqueue(
+                        connection,
+                        recipient,
+                        f"shop:new:{order_id}",
+                        f"Новый демо-заказ #{order_id[:8]}. "
+                        "/menu → Магазин → Кабинет администратора.",
+                        f"New demo order #{order_id[:8]}. /menu → Shop → Admin view.",
+                        self.settings.default_language,
+                    )
             return self._order(
                 connection.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
             )
@@ -179,6 +192,15 @@ class ShopService:
                     query + " ORDER BY created_at DESC, rowid DESC LIMIT 30", params
                 )
             ]
+
+    def admin_order(self, tenant, order_id):
+        with self.db.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM orders WHERE tenant=? AND id=?", (tenant, order_id)
+            ).fetchone()
+            if not row:
+                raise DomainError("Заказ не найден.", "Order not found.")
+            return self._order(row)
 
     def simulate(self, tenant, owner_id, order_id, outcome):
         with self.db.connect(write=True) as connection:

@@ -3,6 +3,7 @@
 import re
 
 from multifuncbot.core.errors import DomainError
+from multifuncbot.core.notifications import enqueue
 
 
 def validate_field(field, value):
@@ -27,8 +28,9 @@ def validate_field(field, value):
 
 
 class LeadService:
-    def __init__(self, db):
+    def __init__(self, db, settings=None):
         self.db = db
+        self.settings = settings
         db.initialize("""
             CREATE TABLE IF NOT EXISTS leads (
                 id INTEGER PRIMARY KEY, tenant INTEGER NOT NULL, owner_id INTEGER NOT NULL,
@@ -43,10 +45,21 @@ class LeadService:
             validate_field(field, draft.get(field, "")) for field in ("request", "name", "contact")
         ]
         with self.db.connect(write=True) as connection:
-            return connection.execute(
+            lead_id = connection.execute(
                 "INSERT INTO leads(tenant,owner_id,request,name,contact) VALUES (?,?,?,?,?)",
                 [tenant, owner_id, *values],
             ).lastrowid
+            if self.settings and self.settings.app_mode == "business":
+                for recipient in self.settings.admin_ids:
+                    enqueue(
+                        connection,
+                        recipient,
+                        f"leads:new:{lead_id}",
+                        f"Новая заявка #{lead_id}. /menu → Заявки → Кабинет администратора.",
+                        f"New request #{lead_id}. /menu → Lead collection → Admin view.",
+                        self.settings.default_language,
+                    )
+            return lead_id
 
     def list(self, tenant, owner_id=None):
         with self.db.connect() as connection:
@@ -57,7 +70,7 @@ class LeadService:
                 params.append(owner_id)
             return [
                 dict(row)
-                for row in connection.execute(query + " ORDER BY id DESC LIMIT 15", params)
+                for row in connection.execute(query + " ORDER BY id DESC LIMIT 10", params)
             ]
 
     def advance(self, tenant, lead_id):

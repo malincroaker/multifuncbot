@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from multifuncbot.core.errors import DomainError
+from multifuncbot.core.notifications import enqueue
 
 SERVICES = {
     "haircut": ("Стрижка", "Haircut", 180000),
@@ -86,7 +87,18 @@ class BookingService:
                     "VALUES (?,?,?,?,?,?)",
                     (tenant, owner_id, chat_id, service, specialist, starts_at),
                 )
-                return cursor.lastrowid
+                booking_id = cursor.lastrowid
+                if self.settings.app_mode == "business":
+                    for recipient in self.settings.admin_ids:
+                        enqueue(
+                            connection,
+                            recipient,
+                            f"booking:new:{booking_id}",
+                            f"Новая запись #{booking_id}. /menu → Запись → Кабинет администратора.",
+                            f"New appointment #{booking_id}. /menu → Appointments → Admin view.",
+                            self.settings.default_language,
+                        )
+                return booking_id
         except sqlite3.IntegrityError as error:
             raise DomainError(
                 "Это время уже занято. Выберите другое.",
@@ -115,6 +127,16 @@ class BookingService:
             if not allowed:
                 raise DomainError("Статус записи уже изменился.", "Appointment status has changed.")
             connection.execute("UPDATE bookings SET status=? WHERE id=?", (status, booking_id))
+            if admin and self.settings.app_mode == "business":
+                enqueue(
+                    connection,
+                    row["chat_id"],
+                    f"booking:{status}:{booking_id}",
+                    f"Запись #{booking_id}: "
+                    + ("подтверждена." if status == "confirmed" else "отклонена."),
+                    f"Appointment #{booking_id}: {status}.",
+                    self.settings.default_language,
+                )
 
     def due_reminders(self, now=None):
         now = now or self.clock()

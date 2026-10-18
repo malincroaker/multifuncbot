@@ -6,6 +6,7 @@ from multifuncbot.modules.guide.content import STEPS
 
 class Guide:
     name = "guide"
+    retain_state_on_exit = True
 
     def title(self, ctx: Context) -> str:
         return ctx.tr("Stepwise · Пошаговый помощник", "Stepwise · Guided onboarding")
