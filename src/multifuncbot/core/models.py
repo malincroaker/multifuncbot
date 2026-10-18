@@ -52,6 +52,13 @@ class Context:
     def can_admin(self) -> bool:
         return self.settings.app_mode == "showcase" or self.user_id in self.settings.admin_ids
 
+    def admin_label(self) -> str:
+        return (
+            self.tr("🧑‍💼 Демо-кабинет бизнеса", "🧑‍💼 Demo business desk")
+            if (self.settings.app_mode == "showcase")
+            else self.tr("🧑‍💼 Кабинет бизнеса", "🧑‍💼 Business desk")
+        )
+
 
 class Feature(Protocol):
     name: str
@@ -63,9 +70,18 @@ class Feature(Protocol):
 
 
 def home_button(context: Context) -> list[Button]:
-    label = (
-        context.tr("Главное меню", "Main menu")
-        if context.settings.default_module
-        else context.tr("Все сценарии", "All scenarios")
-    )
-    return [Button(label, "home")]
+    navigation = context.state("navigation")
+    active = navigation.get("active")
+    if not active:
+        return scenario_exit_button(context)
+    names = navigation.get("menu_names")
+    label = context.tr("Меню сценария", "Scenario menu")
+    if names:
+        label = context.tr("Меню · ", "Menu · ") + context.tr(*names)
+    return [Button(label, f"{active}:menu")]
+
+
+def scenario_exit_button(context: Context) -> list[Button]:
+    if context.settings.default_module:
+        return []
+    return [Button(context.tr("Все сценарии", "All scenarios"), "home")]

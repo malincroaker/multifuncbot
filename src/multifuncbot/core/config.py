@@ -20,6 +20,8 @@ class Settings:
     admin_ids: tuple[int, ...] = ()
     default_module: str = ""
     admin_contact_url: str = ""
+    studio_contact_url: str = ""
+    review_delay_hours: int = 2
     mini_app_url: str = ""
     host: str = "127.0.0.1"
     port: int = 8000
@@ -43,10 +45,17 @@ class Settings:
             url = urlparse(self.mini_app_url)
             if url.scheme != "https" or not url.netloc or url.username or url.password:
                 raise ValueError("MINI_APP_URL must be an HTTPS URL without credentials")
-        if self.admin_contact_url:
-            url = urlparse(self.admin_contact_url)
+        if not 1 <= self.review_delay_hours <= 168:
+            raise ValueError("REVIEW_DELAY_HOURS must be between 1 and 168")
+        for name, contact in (
+            ("ADMIN_CONTACT_URL", self.admin_contact_url),
+            ("STUDIO_CONTACT_URL", self.studio_contact_url),
+        ):
+            if not contact:
+                continue
+            url = urlparse(contact)
             if url.scheme != "https" or url.hostname != "t.me" or not url.path.strip("/"):
-                raise ValueError("ADMIN_CONTACT_URL must be an https://t.me/username link")
+                raise ValueError(f"{name} must be an https://t.me/username link")
         ZoneInfo(self.timezone)
 
     @classmethod
@@ -71,6 +80,8 @@ class Settings:
             ),
             default_module=env.get("DEFAULT_MODULE", ""),
             admin_contact_url=env.get("ADMIN_CONTACT_URL", ""),
+            studio_contact_url=env.get("STUDIO_CONTACT_URL", ""),
+            review_delay_hours=int(env.get("REVIEW_DELAY_HOURS", "2")),
             mini_app_url=env.get("MINI_APP_URL", ""),
             host=env.get("HOST", "127.0.0.1"),
             port=int(env.get("PORT", "8000")),

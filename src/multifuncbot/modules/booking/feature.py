@@ -1,20 +1,23 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from multifuncbot.core.errors import DomainError
-from multifuncbot.core.models import Button, Context, Screen, home_button
+from multifuncbot.core.models import Button, Context, Screen, home_button, scenario_exit_button
+from multifuncbot.core.presentation import display_date, money, zone_label
 from multifuncbot.modules.booking.service import SERVICES, SPECIALISTS, BookingService
 
 STATUSES = {
-    "pending": ("Ожидает подтверждения", "Pending confirmation"),
-    "confirmed": ("Подтверждена", "Confirmed"),
-    "rejected": ("Отклонена", "Rejected"),
-    "cancelled": ("Отменена", "Cancelled"),
+    "pending": ("🕓 Ожидает подтверждения", "🕓 Pending confirmation"),
+    "confirmed": ("✅ Подтверждена", "✅ Confirmed"),
+    "rejected": ("❌ Отклонена", "❌ Rejected"),
+    "cancelled": ("🚫 Отменена", "🚫 Cancelled"),
 }
 STAGES = ("service", "specialist", "day", "starts_at", "review")
 
 
 class Booking:
     name = "booking"
+    menu_names = ("Студия", "Studio")
+    notice_actions = {"review"}
 
     def __init__(self, service):
         self.service = service
@@ -28,17 +31,32 @@ class Booking:
             [Button(ctx.tr("Мои записи", "My appointments"), "booking:mine")],
         ]
         if ctx.can_admin:
-            rows.append([Button(ctx.tr("Кабинет администратора", "Admin view"), "booking:admin")])
+            rows.append([Button(ctx.admin_label(), "booking:admin")])
+        rows.append([Button(ctx.tr("Связаться со студией", "Contact studio"), "booking:contact")])
+        if ctx.settings.app_mode == "showcase":
+            rows.append(
+                [
+                    Button(
+                        ctx.tr("Напоминания и отзывы · пример", "Reminders & reviews · preview"),
+                        "booking:followup-demo",
+                    )
+                ]
+            )
         return Screen(
             ctx.tr(
-                "Студия «Линия» · Демо\n\nУслуга длится 60 минут. Работаем пн–сб, "
-                "10:00–17:00, перерыв 13:00–14:00. Часовой пояс: ",
-                "Line Studio · Demo\n\nEach service takes 60 minutes. Mon–Sat, "
-                "10:00–17:00, break 13:00–14:00. Timezone: ",
+                "Студия «Линия»\nСтрижка · укладка · уход за волосами\n\n"
+                "🕒 Пн–сб · 10:00–17:00\nПерерыв · 13:00–14:00\n"
+                "⏱ Длительность услуги · 60 минут\nВремя · ",
+                "Line Studio\nHaircuts · styling · hair care\n\n"
+                "🕒 Mon–Sat · 10:00–17:00\nBreak · 13:00–14:00\n"
+                "⏱ Appointment · 60 minutes\nTimezone · ",
             )
-            + ctx.settings.timezone,
-            rows + [home_button(ctx)],
-            back="home",
+            + zone_label(self.service.zone, self.service.clock())
+            + ctx.tr(
+                "\n\nДемо: услуги и цены вымышлены.", "\n\nDemo: fictional services and prices."
+            ),
+            rows + [scenario_exit_button(ctx)],
+            back="" if ctx.settings.default_module else "home",
             refresh="booking:menu",
         )
 
@@ -46,6 +64,8 @@ class Booking:
         draft = ctx.state(self.name)
         if not draft:
             return self.start(ctx)
+        if "feedback" in draft:
+            return self.feedback_screen(ctx)
         stage = draft.get("_step") or next(
             (key for key in STAGES[:-1] if key not in draft), "review"
         )
@@ -56,7 +76,7 @@ class Booking:
                     "Choose a service. Prices are demonstration data.",
                 ),
                 [
-                    [Button(f"{ctx.tr(ru, en)} · {price // 100} ₽", f"booking:service:{key}")]
+                    [Button(f"{ctx.tr(ru, en)} · {money(price)}", f"booking:service:{key}")]
                     for key, (ru, en, price) in SERVICES.items()
                 ]
                 + [home_button(ctx)],
@@ -75,7 +95,10 @@ class Booking:
         if stage == "day":
             return Screen(
                 ctx.tr("Выберите дату:", "Choose a date:"),
-                [[Button(day, f"booking:day:{day}")] for day in self.service.days()]
+                [
+                    [Button(display_date(day, ctx.language), f"booking:day:{day}")]
+                    for day in self.service.days()
+                ]
                 + [home_button(ctx)],
                 back="booking:back",
             )
@@ -108,16 +131,22 @@ class Booking:
         specialist = SPECIALISTS[draft["specialist"]]
         return Screen(
             ctx.tr("Проверьте запись:\n\n", "Review appointment:\n\n")
-            + f"{ctx.tr(*service[:2])} · {service[2] // 100} ₽\n"
-            + f"{ctx.tr(*specialist)}\n{draft['day']} "
+            + f"{ctx.tr(*service[:2])} · {money(service[2])}\n"
+            + ctx.tr("Мастер · ", "Specialist · ")
+            + f"{ctx.tr(*specialist)}\n"
+            + display_date(draft["day"], ctx.language)
+            + " · "
             + datetime.fromisoformat(draft["starts_at"])
             .astimezone(self.service.zone)
             .strftime("%H:%M")
-            + "\n"
-            + ctx.settings.timezone,
+            + " "
+            + zone_label(self.service.zone, datetime.fromisoformat(draft["starts_at"]))
+            + ctx.tr(
+                "\n\nПосле подтверждения студией напомним за час до визита.",
+                "\n\nOnce approved, we will remind you an hour before your visit.",
+            ),
             [
                 [Button(ctx.tr("Подтвердить запись", "Confirm booking"), "booking:confirm")],
-                [Button(ctx.tr("Начать заново", "Start again"), "booking:new")],
                 home_button(ctx),
             ],
             back="booking:back",
@@ -127,45 +156,80 @@ class Booking:
         if admin and not ctx.can_admin:
             raise DomainError("Нет доступа.", "Access denied.")
         records = self.service.list(ctx.tenant, None if admin else ctx.user_id)[-15:]
-        text = (
-            ctx.tr("Кабинет администратора", "Admin view")
-            if admin
-            else ctx.tr("Мои записи", "My appointments")
-        )
+        text = ctx.admin_label() if admin else ctx.tr("Мои записи", "My appointments")
+        if admin and ctx.settings.app_mode == "showcase":
+            text += ctx.tr(
+                "\nЗдесь только ваши демо-записи. После решения вы получите сообщение как клиент.",
+                "\nOnly your demo visits appear here. Decisions will reach you as the customer.",
+            )
         rows = []
         for row in records:
             start = datetime.fromisoformat(row["starts_at"]).astimezone(self.service.zone)
             text += (
-                f"\n\n#{row['id']} · {start:%Y-%m-%d %H:%M}\n"
+                f"\n\n#{row['id']} · {display_date(start.date(), ctx.language)} · {start:%H:%M} "
+                + zone_label(self.service.zone, start)
+                + "\n"
                 + ctx.tr(*SERVICES[row["service"]][:2])
                 + " · "
                 + ctx.tr(*SPECIALISTS[row["specialist"]])
             )
             text += "\n" + ctx.tr(*STATUSES[row["status"]])
-            if row["status"] in ("pending", "confirmed"):
+            if row["status"] in ("pending", "confirmed") and start > self.service.clock():
                 rows.append(
                     [
                         Button(
                             ctx.tr(f"Отменить #{row['id']}", f"Cancel #{row['id']}"),
-                            f"booking:cancel:{row['id']}",
+                            f"booking:{'admincancel' if admin else 'cancel'}:{row['id']}",
                         )
                     ]
                 )
-            if admin and row["status"] == "pending":
+            if admin and row["status"] == "pending" and start > self.service.clock():
                 rows.append(
                     [
                         Button(
-                            ctx.tr(f"Подтвердить #{row['id']}", f"Approve #{row['id']}"),
+                            ctx.tr(f"✅ Подтвердить #{row['id']}", f"✅ Approve #{row['id']}"),
                             f"booking:approve:{row['id']}",
                         ),
                         Button(
-                            ctx.tr(f"Отклонить #{row['id']}", f"Reject #{row['id']}"),
+                            ctx.tr(f"❌ Отклонить #{row['id']}", f"❌ Reject #{row['id']}"),
                             f"booking:reject:{row['id']}",
                         ),
                     ]
                 )
+            if (
+                row["status"] == "confirmed"
+                and start + timedelta(hours=ctx.settings.review_delay_hours) <= self.service.clock()
+            ):
+                feedback = self.service.feedback(ctx.tenant, row["owner_id"], row["id"])
+                if feedback["rating"] is None and not admin:
+                    rows.append(
+                        [
+                            Button(
+                                ctx.tr(
+                                    f"⭐ Оценить визит #{row['id']}", f"⭐ Rate visit #{row['id']}"
+                                ),
+                                f"booking:review:{row['id']}",
+                            )
+                        ]
+                    )
+                elif feedback["rating"] is not None:
+                    text += ctx.tr(
+                        f"\nОценка визита · {feedback['rating']}/5 ⭐",
+                        f"\nVisit rating · {feedback['rating']}/5 ⭐",
+                    )
+                    if admin and feedback["comment"]:
+                        text += " · " + feedback["comment"][:80]
         if not records:
             text += ctx.tr("\n\nЗаписей пока нет.", "\n\nNo appointments yet.")
+        elif not admin:
+            rows.append(
+                [
+                    Button(
+                        ctx.tr("Связаться со студией / мастером", "Contact studio / specialist"),
+                        "booking:contact",
+                    )
+                ]
+            )
         return Screen(
             text,
             rows + [home_button(ctx)],
@@ -173,14 +237,194 @@ class Booking:
             refresh="booking:admin" if admin else "booking:mine",
         )
 
+    def feedback_screen(self, ctx):
+        draft = ctx.state(self.name)
+        value = draft.get("feedback")
+        if value is None:
+            return self.listing(ctx)
+        demo = value == "demo"
+        if not demo:
+            record = self.service.feedback(ctx.tenant, ctx.user_id, value)
+            if record["rating"] is not None:
+                return Screen(
+                    ctx.tr(
+                        "Спасибо! Ваш отзыв уже сохранён.",
+                        "Thank you! Your feedback has already been saved.",
+                    ),
+                    [home_button(ctx)],
+                    back="booking:mine",
+                )
+        title = (
+            ctx.tr(
+                "Пример отзыва · данные не отправляются студии",
+                "Sample review · not sent to a studio",
+            )
+            if demo
+            else (ctx.tr(f"Отзыв о визите #{value}", f"Review visit #{value}"))
+        )
+        if "rating" not in draft:
+            return Screen(
+                title
+                + ctx.tr(
+                    "\n\nКак прошёл приём? Выберите оценку от 1 до 5.",
+                    "\n\nHow was your visit? Choose a rating from 1 to 5.",
+                ),
+                [
+                    [Button(f"{score} ⭐", f"booking:rating:{score}") for score in range(1, 6)],
+                    home_button(ctx),
+                ],
+                back="booking:followup-demo" if demo else "booking:mine",
+            )
+        text = title + ctx.tr(
+            f"\n\nОценка · {draft['rating']}/5 ⭐", f"\n\nRating · {draft['rating']}/5 ⭐"
+        )
+        if draft.get("comment"):
+            text += "\n\n" + draft["comment"]
+        else:
+            text += ctx.tr(
+                "\n\nПри желании напишите комментарий (до 500 символов) "
+                "или отправьте только оценку.",
+                "\n\nOptionally write a comment (up to 500 characters), or submit just the rating.",
+            )
+        return Screen(
+            text,
+            [
+                [Button(ctx.tr("Отправить отзыв", "Submit review"), "booking:feedback-submit")],
+                home_button(ctx),
+            ],
+            back="booking:feedback-back",
+        )
+
+    def reminder_text(self, record, language):
+        start = datetime.fromisoformat(record["starts_at"]).astimezone(self.service.zone)
+        details = (
+            f"#{record['id']} · {display_date(start.date(), language)} · {start:%H:%M} "
+            + zone_label(self.service.zone, start)
+        )
+        service = SERVICES[record["service"]][0 if language == "ru" else 1]
+        specialist = SPECIALISTS[record["specialist"]][0 if language == "ru" else 1]
+        return ("🔔 Скоро ваш визит\n" if language == "ru" else "🔔 Your visit is coming up\n") + (
+            f"{details}\n{service} · {specialist}\n\n"
+            + (
+                "До начала — не больше часа. /menu → Мои записи. "
+                "Если планы изменились, свяжитесь со студией."
+                if language == "ru"
+                else "Your appointment starts within an hour. /menu → My appointments. "
+                "Contact the studio if plans change."
+            )
+        )
+
     def action(self, ctx: Context, action: str):
         command, _, value = action.partition(":")
+        if command == "contact":
+            rows = []
+            if ctx.settings.studio_contact_url:
+                rows.append(
+                    [
+                        Button(
+                            ctx.tr("Написать в студию", "Message studio"),
+                            url=ctx.settings.studio_contact_url,
+                        )
+                    ]
+                )
+            return Screen(
+                ctx.tr(
+                    "Связь со студией\n\nУточните детали визита "
+                    "или попросите связаться с вашим мастером.",
+                    "Contact the studio\n\nAsk about your visit "
+                    "or request a conversation with your specialist.",
+                )
+                + (
+                    ""
+                    if rows
+                    else ctx.tr(
+                        "\n\nЭто демо-студия: реальный контакт пока не подключён.",
+                        "\n\nThis is a demo studio: a real contact is not connected yet.",
+                    )
+                ),
+                rows + [home_button(ctx)],
+                back="booking:menu",
+                refresh="booking:contact",
+            )
+        if command == "followup-demo":
+            ctx.save(self.name, {})
+            return Screen(
+                ctx.tr(
+                    "После записи\n\n✅ Студия подтверждает визит — клиент получает сообщение.\n"
+                    "🔔 За час до визита — напоминание с услугой, мастером и временем.\n"
+                    f"⭐ Через {ctx.settings.review_delay_hours} ч после начала "
+                    "— просьба оценить приём.\n\n"
+                    "Ниже можно попробовать форму отзыва сразу, без создания записи и ожидания.",
+                    "After booking\n\n✅ Studio approval — customer notification.\n"
+                    "🔔 An hour before the visit — service, specialist and time reminder.\n"
+                    f"⭐ {ctx.settings.review_delay_hours} hours after the start "
+                    "— request to rate the visit.\n\n"
+                    "Try the sample review below without creating an appointment or waiting.",
+                ),
+                [
+                    [
+                        Button(
+                            ctx.tr("Попробовать отзыв", "Try a sample review"),
+                            "booking:demo-review",
+                        )
+                    ],
+                    home_button(ctx),
+                ],
+                back="booking:menu",
+                refresh="booking:followup-demo",
+            )
+        if command in ("review", "demo-review"):
+            if command == "review":
+                if not value.isdecimal():
+                    raise DomainError("Запись не найдена.", "Appointment not found.")
+                self.service.feedback(ctx.tenant, ctx.user_id, int(value))
+            elif ctx.settings.app_mode != "showcase":
+                raise DomainError("Доступно только в демо.", "Available only in showcase mode.")
+            feedback_id = int(value) if command == "review" else "demo"
+            if ctx.state(self.name).get("feedback") != feedback_id:
+                ctx.save(self.name, {"feedback": feedback_id})
+            return self.feedback_screen(ctx)
+        if command in ("rating", "feedback-back", "feedback-submit"):
+            draft = ctx.state(self.name)
+            if "feedback" not in draft:
+                return self.listing(ctx)
+            if command == "rating" and value in ("1", "2", "3", "4", "5"):
+                draft["rating"] = int(value)
+            elif command == "feedback-back":
+                draft.pop("rating", None)
+            elif command == "feedback-submit" and "rating" in draft:
+                demo = draft["feedback"] == "demo"
+                if not demo:
+                    self.service.save_feedback(
+                        ctx.tenant,
+                        ctx.user_id,
+                        draft["feedback"],
+                        draft["rating"],
+                        draft.get("comment", ""),
+                    )
+                ctx.save(self.name, {})
+                return Screen(
+                    ctx.tr("Спасибо за отзыв!", "Thank you for your feedback!")
+                    + (
+                        ctx.tr(
+                            "\nЭто был пример: реальные записи не изменились.",
+                            "\nThis was a preview: no actual appointments were changed.",
+                        )
+                        if demo
+                        else ""
+                    ),
+                    [home_button(ctx)],
+                    back="booking:followup-demo" if demo else "booking:mine",
+                )
+            ctx.save(self.name, draft)
+            return self.feedback_screen(ctx)
         if command == "menu":
             ctx.save(self.name, {})
             return self.start(ctx)
         if command in ("mine", "admin"):
+            ctx.save(self.name, {})
             return self.listing(ctx, command == "admin")
-        if command in ("cancel", "approve", "reject"):
+        if command in ("cancel", "admincancel", "approve", "reject"):
             if not value.isdecimal():
                 raise DomainError("Неверная запись.", "Invalid appointment.")
             is_admin = command != "cancel"
@@ -190,7 +434,12 @@ class Booking:
                 ctx.tenant,
                 ctx.user_id,
                 int(value),
-                {"cancel": "cancelled", "approve": "confirmed", "reject": "rejected"}[command],
+                {
+                    "cancel": "cancelled",
+                    "admincancel": "cancelled",
+                    "approve": "confirmed",
+                    "reject": "rejected",
+                }[command],
                 admin=is_admin,
             )
             return self.listing(ctx, is_admin)
@@ -238,18 +487,14 @@ class Booking:
             ctx.save(self.name, {})
             return Screen(
                 ctx.tr(
-                    f"Запись #{booking_id} создана и ожидает подтверждения. "
-                    "Посмотрите её в кабинете администратора.",
-                    f"Appointment #{booking_id} is pending confirmation. "
-                    "You can review it in the admin view.",
+                    f"🕓 Запись #{booking_id} создана и ожидает подтверждения. "
+                    "Студия подтвердит время. Статус появится в «Мои записи».",
+                    f"🕓 Appointment #{booking_id} is pending confirmation. "
+                    "The studio will confirm the time. Check My appointments for updates.",
                 ),
                 [
                     [Button(ctx.tr("Мои записи", "My appointments"), "booking:mine")],
-                    *(
-                        [[Button(ctx.tr("Кабинет администратора", "Admin view"), "booking:admin")]]
-                        if ctx.can_admin
-                        else []
-                    ),
+                    *([[Button(ctx.admin_label(), "booking:admin")]] if ctx.can_admin else []),
                     home_button(ctx),
                 ],
                 back="booking:menu",
@@ -258,6 +503,11 @@ class Booking:
         return self.flow(ctx)
 
     def text(self, ctx, text):
+        draft = ctx.state(self.name)
+        if "feedback" in draft and "rating" in draft:
+            draft["comment"] = self.service.validate_feedback_comment(text)
+            ctx.save(self.name, draft)
+            return self.feedback_screen(ctx)
         return self.flow(ctx)
 
 

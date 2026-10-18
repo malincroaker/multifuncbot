@@ -1,20 +1,22 @@
 from uuid import uuid4
 
 from multifuncbot.core.errors import DomainError
-from multifuncbot.core.models import Button, Screen, home_button
+from multifuncbot.core.models import Button, Screen, home_button, scenario_exit_button
+from multifuncbot.core.presentation import money
 from multifuncbot.modules.shop.catalog import PRODUCTS
 from multifuncbot.modules.shop.service import ShopService, customer_field
 
 STATUSES = {
-    "awaiting_payment": ("Ожидает демо-оплаты", "Awaiting demo payment"),
-    "paid": ("Демо-оплата успешна", "Demo payment successful"),
-    "payment_failed": ("Демо-оплата отклонена", "Demo payment failed"),
-    "cancelled": ("Отменён", "Cancelled"),
+    "awaiting_payment": ("🕓 Ожидает демо-оплаты", "🕓 Awaiting demo payment"),
+    "paid": ("✅ Демо-оплата успешна", "✅ Demo payment successful"),
+    "payment_failed": ("❌ Демо-оплата отклонена", "❌ Demo payment failed"),
+    "cancelled": ("🚫 Отменён", "🚫 Cancelled"),
 }
 
 
 class Shop:
     name = "shop"
+    menu_names = ("Магазин", "Shop")
 
     def __init__(self, service):
         self.service = service
@@ -34,6 +36,10 @@ class Shop:
                     )
                 ]
             )
+        else:
+            rows.append(
+                [Button(ctx.tr("Mini App · как открыть", "Mini App · how to open"), "shop:miniapp")]
+            )
         rows.extend(
             [
                 [Button(ctx.tr("Каталог в чате", "Chat catalogue"), "shop:catalog")],
@@ -42,7 +48,7 @@ class Shop:
             ]
         )
         if ctx.can_admin:
-            rows.append([Button(ctx.tr("Кабинет администратора", "Admin view"), "shop:admin")])
+            rows.append([Button(ctx.admin_label(), "shop:admin")])
         return Screen(
             ctx.tr(
                 "Магазин «Место» · Демо\n\nКанцелярия для хороших идей. "
@@ -52,19 +58,23 @@ class Shop:
                 "Browse, add to cart and check out in the Mini App or chat. "
                 "Payments are simulated: no real money is charged.",
             ),
-            rows + [home_button(ctx)],
-            back="home",
+            rows + [scenario_exit_button(ctx)],
+            back="" if ctx.settings.default_module else "home",
             refresh="shop:menu",
         )
 
     def catalog(self, ctx):
+        ctx.save("shop_view", {"item_back": "shop:catalog"})
         return Screen(
-            ctx.tr("Добавьте товар в корзину:", "Add a product to your cart:"),
+            ctx.tr(
+                "Каталог «Место»\n\nВыберите товар, чтобы узнать подробности.",
+                "Mesto catalogue\n\nChoose a product to see its details.",
+            ),
             [
                 [
                     Button(
-                        f"{product['title'][ctx.language]} · {product['price'] // 100} ₽",
-                        f"shop:add:{key}",
+                        f"{product['title'][ctx.language]} · {money(product['price'])}",
+                        f"shop:item:{key}",
                     )
                 ]
                 for key, product in PRODUCTS.items()
@@ -75,31 +85,39 @@ class Shop:
         )
 
     def cart(self, ctx):
+        ctx.save("shop_view", {"item_back": "shop:cart"})
         cart = self.service.cart(ctx.tenant, ctx.user_id)
         text = ctx.tr("Корзина\n", "Cart\n")
         rows = []
         for line in cart["lines"]:
-            text += f"\n{line['title'][ctx.language]} × {line['quantity']} · "
-            text += f"{line['line_total'] // 100} ₽"
+            short_title = line["title"][ctx.language].split(" «")[0].split(",")[0]
+            text += f"\n{line['title'][ctx.language]}\n"
+            text += f"{line['quantity']} × {money(line['price'])} = {money(line['line_total'])}\n"
             rows.append(
                 [
-                    Button(f"− {line['title'][ctx.language]}", f"shop:remove:{line['id']}"),
+                    Button("−", f"shop:remove:{line['id']}"),
+                    Button(
+                        f"{short_title} · {line['quantity']}",
+                        f"shop:item:{line['id']}",
+                    ),
                     Button("+", f"shop:add:{line['id']}"),
                 ]
             )
         text += ctx.tr(
-            f"\n\nИтого: {cart['subtotal'] // 100} ₽",
-            "\n\nTotal: " + f"{cart['subtotal'] // 100} ₽",
+            f"\nИтого: {money(cart['subtotal'])}",
+            f"\nTotal: {money(cart['subtotal'])}",
         )
         if cart["count"]:
-            rows.append(
-                [Button(ctx.tr("Оформить · самовывоз", "Checkout · pickup"), "shop:checkout")]
-            )
+            rows.append([Button(ctx.tr("Оформить заказ", "Checkout"), "shop:checkout")])
         else:
             text += ctx.tr("\nКорзина пока пуста.", "\nYour cart is empty.")
         return Screen(
             text,
-            rows + [[Button(ctx.tr("Каталог", "Catalogue"), "shop:catalog")], home_button(ctx)],
+            rows
+            + [
+                [Button(ctx.tr("Продолжить покупки", "Continue shopping"), "shop:catalog")],
+                home_button(ctx),
+            ],
             back="shop:menu",
             refresh="shop:cart",
         )
@@ -110,7 +128,10 @@ class Shop:
             return self.start(ctx)
         field = self.field(draft)
         if field == "customer_name":
-            text = ctx.tr("Как к вам обращаться?", "What is your name?")
+            text = ctx.tr(
+                "Оформление заказа\nСамовывоз · бесплатно\n\nКак к вам обращаться?",
+                "Checkout\nPickup · free\n\nWhat is your name?",
+            )
         elif field == "contact":
             text = ctx.tr(
                 "Укажите телефон, email или @username. Можно вымышленные для демо.",
@@ -119,6 +140,10 @@ class Shop:
         else:
             text = ctx.tr("Проверьте данные · Демо, самовывоз\n", "Review · Demo, pickup\n")
             text += f"\n{draft['customer_name']}\n{draft['contact']}"
+            cart = self.service.cart(ctx.tenant, ctx.user_id)
+            for line in cart["lines"]:
+                text += f"\n{line['title'][ctx.language]} × {line['quantity']}"
+            text += ctx.tr("\n\nИтого · ", "\n\nTotal · ") + money(cart["subtotal"])
             return Screen(
                 text,
                 [
@@ -145,22 +170,27 @@ class Shop:
         ctx.save(self.name, draft)
 
     def order_screen(self, ctx, order, *, admin=False):
-        text = f"#{order['id'][:8]} · {order['total'] // 100} ₽\n"
+        text = ctx.tr("Заказ #", "Order #") + order["id"][:8] + "\n"
         text += ctx.tr(*STATUSES[order["status"]])
-        text += f"\n{order['customer_name']} · {order['contact']}"
+        text += f"\n\n{order['customer_name']} · {order['contact']}\n"
         for line in order["lines"]:
-            text += f"\n{line['title'][ctx.language]} × {line['quantity']}"
+            text += f"\n{line['title'][ctx.language]} × {line['quantity']} · " + money(
+                line["line_total"]
+            )
         if order["fulfillment"] == "delivery":
-            text += f"\n{order['address']}"
+            text += ctx.tr("\n\nДоставка · ", "\n\nDelivery · ") + order["address"]
+        else:
+            text += ctx.tr("\n\nСамовывоз · бесплатно", "\n\nPickup · free")
+        text += ctx.tr("\nИтого · ", "\nTotal · ") + money(order["total"])
         text += ctx.tr(
             "\n\nДемонстрация. Деньги не списываются.", "\n\nDemonstration. No money is charged."
         )
         rows = []
         if not admin and order["status"] in ("awaiting_payment", "payment_failed"):
             for label, en, outcome in (
-                ("Успешная оплата", "Successful payment", "success"),
-                ("Отказ оплаты", "Payment failure", "failure"),
-                ("Отмена", "Cancel", "cancel"),
+                ("✅ Демо: оплата успешна", "✅ Demo: successful payment", "success"),
+                ("❌ Демо: оплата отклонена", "❌ Demo: payment declined", "failure"),
+                ("Отменить заказ", "Cancel order", "cancel"),
             ):
                 rows.append([Button(ctx.tr(label, en), f"shop:pay:{order['id']}:{outcome}")])
         return Screen(
@@ -172,6 +202,39 @@ class Shop:
 
     def action(self, ctx, action):
         command, _, value = action.partition(":")
+        if command == "miniapp":
+            return Screen(
+                ctx.tr(
+                    "Магазин в Mini App\n\nКарточки товаров, корзина и оформление заказа "
+                    "открываются прямо внутри Telegram.\n\nВ этой демонстрации веб-магазин ещё "
+                    "не опубликован. Пока можно пройти весь заказ через «Каталог в чате».",
+                    "Shop Mini App\n\nBrowse illustrated products, use the cart and check out "
+                    "inside Telegram.\n\nThe web shop is not published yet. You can still try "
+                    "the full checkout using the chat catalogue.",
+                ),
+                [
+                    [Button(ctx.tr("Каталог в чате", "Chat catalogue"), "shop:catalog")],
+                    home_button(ctx),
+                ],
+                back="shop:menu",
+                refresh="shop:miniapp",
+            )
+        if command == "item":
+            if value not in PRODUCTS:
+                raise DomainError("Товар не найден.", "Product not found.")
+            product = PRODUCTS[value]
+            back = ctx.state("shop_view").get("item_back", "shop:catalog")
+            return Screen(
+                f"{product['title'][ctx.language]}\n\n{product['description'][ctx.language]}\n\n"
+                + money(product["price"]),
+                [
+                    [Button(ctx.tr("Добавить в корзину", "Add to cart"), f"shop:add:{value}")],
+                    [Button(ctx.tr("Открыть корзину", "Open cart"), "shop:cart")],
+                    home_button(ctx),
+                ],
+                back=back,
+                refresh=f"shop:item:{value}",
+            )
         if command in ("menu", "catalog", "cart", "orders", "admin"):
             ctx.save(self.name, {})
         if command in ("back", "keep"):
@@ -242,7 +305,7 @@ class Shop:
                 [
                     [
                         Button(
-                            f"#{order['id'][:8]} · {order['total'] // 100} ₽ · "
+                            f"#{order['id'][:8]} · {money(order['total'])} · "
                             + ctx.tr(*STATUSES[order["status"]]),
                             f"shop:{'adminorder' if command == 'admin' else 'order'}:{order['id']}",
                         )

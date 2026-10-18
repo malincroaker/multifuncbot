@@ -275,6 +275,7 @@ def test_transport_cleans_input_only_after_render_and_duplicate_click_is_harmles
     click(button("lang:ru"), 2)
     click(button("enter:shop"), 3)
     click(button("shop:catalog"), 4)
+    click(button("shop:item:notebook"), 40)
     add = button("shop:add:notebook")
     click(add, 5)
     click(add, 6)
@@ -295,6 +296,6 @@ def test_each_module_has_an_exit_and_default_module_back_does_not_leave_client_b
     router = Router(db, Settings(enabled_modules=(module,), default_module=module))
     router.action(1, 1, "lang:ru")
     screen = router.action(1, 1, f"enter:{module}")
-    assert any(b.action == "home" for row in screen.rows for b in row)
+    assert not any(b.action == "home" for row in screen.rows for b in row)
     router.action(1, 1, "back")
     assert db.state(1, 1, "navigation")["active"] == module

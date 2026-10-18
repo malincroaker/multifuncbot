@@ -1,11 +1,12 @@
 from pathlib import Path
 
-from multifuncbot.core.models import Button, Context, Screen, home_button
+from multifuncbot.core.models import Button, Context, Screen, home_button, scenario_exit_button
 from multifuncbot.modules.guide.content import STEPS
 
 
 class Guide:
     name = "guide"
+    menu_names = ("Stepwise", "Stepwise")
     retain_state_on_exit = True
 
     def title(self, ctx: Context) -> str:
@@ -21,17 +22,22 @@ class Guide:
                 "Your progress survives scenario switches and restarts.",
             ),
             [
-                [Button(ctx.tr("Начать заново", "Start again"), "guide:new")],
-                *(
-                    [[Button(ctx.tr("Продолжить гайд", "Continue guide"), "guide:resume")]]
-                    if step is not None
-                    else []
-                ),
+                [
+                    Button(
+                        ctx.tr("Открыть гайд", "Open guide")
+                        if step is None or step >= 3
+                        else ctx.tr(
+                            f"Открыть гайд · шаг {step + 1} из 3",
+                            f"Open guide · step {step + 1} of 3",
+                        ),
+                        "guide:open",
+                    )
+                ],
                 [Button(ctx.tr("Скачать PDF", "Download PDF"), "guide:pdf")],
                 [Button(ctx.tr("Связь с администратором", "Contact admin"), "guide:contact")],
-                home_button(ctx),
+                scenario_exit_button(ctx),
             ],
-            back="home",
+            back="" if ctx.settings.default_module else "home",
             refresh="guide:menu",
         )
 
@@ -47,7 +53,7 @@ class Guide:
                 ),
                 [
                     [Button(ctx.tr("Скачать PDF", "Download PDF"), "guide:pdf")],
-                    [Button(ctx.tr("Начать заново", "Start again"), "guide:new")],
+                    [Button(ctx.tr("Пройти гайд ещё раз", "Read guide again"), "guide:new")],
                     home_button(ctx),
                 ],
                 back="guide:back",
@@ -69,6 +75,10 @@ class Guide:
     def action(self, ctx: Context, action: str) -> Screen:
         if action == "menu":
             return self.start(ctx)
+        if action == "open":
+            if ctx.state(self.name).get("step") is None:
+                ctx.save(self.name, {"step": 0})
+            return self.step(ctx)
         if action == "new":
             ctx.save(self.name, {"step": 0})
         elif action in ("next", "back"):

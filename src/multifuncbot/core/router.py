@@ -49,6 +49,7 @@ class Router:
     def remember(self, user_id: int, chat_id: int, screen: Screen) -> Screen:
         ctx = self.context(user_id, chat_id)
         active = ctx.state("navigation").get("active")
+        screen.rows = [row for row in screen.rows if row]
         if not screen.refresh and active in self.features:
             screen.refresh = f"{active}:resume"
         if screen.back and not any(
@@ -56,7 +57,11 @@ class Router:
         ):
             # Keep the global home link last, consistently across all modules.
             position = next(
-                (i for i, row in enumerate(screen.rows) if any(b.action == "home" for b in row)),
+                (
+                    i
+                    for i, row in enumerate(screen.rows)
+                    if any(b.action in ("home", f"{active}:menu") for b in row)
+                ),
                 len(screen.rows),
             )
             screen.rows.insert(position, [Button(ctx.tr("Назад", "Back"), screen.back)])
@@ -94,7 +99,13 @@ class Router:
         if name not in self.features:
             return self.menu(ctx)
         self.leave(ctx)
-        ctx.save("navigation", {"active": name})
+        ctx.save(
+            "navigation",
+            {
+                "active": name,
+                "menu_names": getattr(self.features[name], "menu_names", (name, name)),
+            },
+        )
         return self.features[name].start(ctx)
 
     def leave(self, ctx: Context):
@@ -121,6 +132,21 @@ class Router:
 
     def action(self, user_id: int, chat_id: int, data: str) -> Screen:
         return self.remember(user_id, chat_id, self._action(user_id, chat_id, data))
+
+    def notice(self, user_id: int, chat_id: int, data: str) -> Screen:
+        parts = data.split(":", 3)
+        if len(parts) != 4:
+            return self.action(user_id, chat_id, "scenario")
+        _, name, action, value = parts
+        feature = self.features.get(name)
+        if not feature or action not in getattr(feature, "notice_actions", ()):
+            return self.action(user_id, chat_id, "scenario")
+        ctx = self.context(user_id, chat_id)
+        if ctx.state("navigation").get("active") != name:
+            self.enter(ctx, name)
+        # Only explicitly declared navigation actions are accepted from retained notices.
+        # The feature still validates ownership and eligibility before displaying data.
+        return self.action(user_id, chat_id, f"{name}:{action}:{value}")
 
     def _action(self, user_id: int, chat_id: int, data: str) -> Screen:
         ctx = self.context(user_id, chat_id)
@@ -153,6 +179,17 @@ class Router:
                 self.enter(ctx, self.settings.default_module)
                 if self.settings.default_module
                 else self.menu(ctx)
+            )
+        if data == "scenario":
+            active = ctx.state("navigation").get("active")
+            return (
+                self.features[active].action(ctx, "menu")
+                if active in self.features
+                else (
+                    self.enter(ctx, self.settings.default_module)
+                    if self.settings.default_module
+                    else self.menu(ctx)
+                )
             )
         if data.startswith("enter:"):
             return self.enter(ctx, data.split(":", 1)[1])

@@ -1,6 +1,12 @@
 from multifuncbot.core.errors import DomainError
-from multifuncbot.core.models import Button, Screen, home_button
-from multifuncbot.modules.leads.service import LeadService, validate_field
+from multifuncbot.core.models import Button, Screen, home_button, scenario_exit_button
+from multifuncbot.modules.leads.service import (
+    STATUSES,
+    TRANSITIONS,
+    LeadService,
+    validate_comment,
+    validate_field,
+)
 
 FIELDS = {
     "request": (
@@ -13,15 +19,11 @@ FIELDS = {
         "Enter your phone, email or @username. Fictional contact details are fine in this demo.",
     ),
 }
-STATUSES = {
-    "new": ("Новая", "New"),
-    "in_progress": ("В работе", "In progress"),
-    "done": ("Завершена", "Complete"),
-}
 
 
 class Leads:
     name = "leads"
+    menu_names = ("Заявки", "Requests")
 
     def __init__(self, service):
         self.service = service
@@ -35,7 +37,7 @@ class Leads:
             [Button(ctx.tr("Мои заявки", "My requests"), "leads:mine")],
         ]
         if ctx.can_admin:
-            rows.append([Button(ctx.tr("Кабинет администратора", "Admin view"), "leads:admin")])
+            rows.append([Button(ctx.admin_label(), "leads:admin")])
         return Screen(
             ctx.tr(
                 "Приём заявок · Демо\n\nБот уточнит задачу и контакт, "
@@ -43,8 +45,8 @@ class Leads:
                 "Lead collection · Demo\n\nDescribe your task, leave a contact, "
                 "review your answers and submit your request.",
             ),
-            rows + [home_button(ctx)],
-            back="home",
+            rows + [scenario_exit_button(ctx)],
+            back="" if ctx.settings.default_module else "home",
             refresh="leads:menu",
         )
 
@@ -52,6 +54,8 @@ class Leads:
         draft = ctx.state(self.name)
         if not draft:
             return self.start(ctx)
+        if "status_change" in draft:
+            return self.status_screen(ctx)
         field = self.field(draft)
         if field != "review":
             text = ctx.tr(*FIELDS[field])
@@ -93,19 +97,30 @@ class Leads:
     def listing(self, ctx, admin=False):
         if admin and not ctx.can_admin:
             raise DomainError("Нет доступа.", "Access denied.")
-        rows, lines = [], []
+        rows = []
+        lines = [ctx.admin_label() if admin else ctx.tr("Мои заявки", "My requests")]
+        if admin and ctx.settings.app_mode == "showcase":
+            lines.append(
+                ctx.tr(
+                    "Управляйте своими демо-заявками. Изменения придут вам как клиенту.",
+                    "Manage your demo requests. Updates will reach you as the customer.",
+                )
+            )
         for row in self.service.list(ctx.tenant, None if admin else ctx.user_id):
             lines.append(
                 f"#{row['id']} · {ctx.tr(*STATUSES[row['status']])}\n"
                 f"{row['request'][:120]}\n{row['name']} · {row['contact']}"
             )
-            if admin and row["status"] != "done":
-                label = (
-                    ctx.tr("Взять в работу", "Start work")
-                    if row["status"] == "new"
-                    else ctx.tr("Завершить", "Complete")
-                )
-                rows.append([Button(f"{label} #{row['id']}", f"leads:advance:{row['id']}")])
+            rows.append(
+                [
+                    Button(
+                        ctx.tr(f"Открыть заявку #{row['id']}", f"Open request #{row['id']}"),
+                        f"leads:{'adminitem' if admin else 'item'}:{row['id']}",
+                    )
+                ]
+            )
+        if not rows:
+            lines.append(ctx.tr("Заявок пока нет.", "No requests yet."))
         return Screen(
             "\n\n".join(lines) or ctx.tr("Заявок пока нет.", "No requests yet."),
             rows + [home_button(ctx)],
@@ -113,9 +128,127 @@ class Leads:
             refresh="leads:admin" if admin else "leads:mine",
         )
 
+    def detail(self, ctx, lead_id, admin=False):
+        if admin and not ctx.can_admin:
+            raise DomainError("Нет доступа.", "Access denied.")
+        record = self.service.get(ctx.tenant, lead_id, None if admin else ctx.user_id)
+        text = ctx.tr(f"Заявка #{lead_id}\n", f"Request #{lead_id}\n")
+        text += ctx.tr(*STATUSES[record["status"]])
+        text += f"\n\n{record['request']}\n\n{record['name']} · {record['contact']}"
+        if record["comment"]:
+            text += ctx.tr("\n\nКомментарий: ", "\n\nComment: ") + record["comment"]
+        labels = {
+            "new": ("↩ Вернуть в новые", "↩ Return to new"),
+            "in_progress": ("🔧 Взять в работу", "🔧 Start / resume work"),
+            "paused": ("⏸ Поставить на паузу", "⏸ Pause"),
+            "done": ("✅ Завершить", "✅ Complete"),
+            "rejected": ("❌ Отказаться с комментарием", "❌ Decline with a reason"),
+        }
+        rows = (
+            [
+                [Button(ctx.tr(*labels[target]), f"leads:status:{lead_id}:{target}")]
+                for target in TRANSITIONS[record["status"]]
+            ]
+            if admin
+            else []
+        )
+        if admin:
+            history = self.service.history(ctx.tenant, lead_id)[-3:]
+            if history:
+                text += ctx.tr("\n\nПоследние изменения:", "\n\nRecent changes:")
+                for event in history:
+                    text += "\n" + ctx.tr(*STATUSES[event["status"]])
+                    if event["comment"]:
+                        text += " · " + event["comment"][:100]
+        return Screen(
+            text,
+            rows + [home_button(ctx)],
+            back="leads:admin" if admin else "leads:mine",
+            refresh=f"leads:{'adminitem' if admin else 'item'}:{lead_id}",
+        )
+
+    def status_screen(self, ctx):
+        if not ctx.can_admin:
+            raise DomainError("Нет доступа.", "Access denied.")
+        change = ctx.state(self.name).get("status_change")
+        if not change:
+            return self.listing(ctx, True)
+        record = self.service.get(ctx.tenant, change["id"])
+        target = ctx.tr(*STATUSES[change["target"]])
+        if "comment" not in change:
+            text = ctx.tr(
+                "Укажите причину для клиента (до 500 символов).",
+                "Write a reason for the customer (up to 500 characters).",
+            )
+            rows = (
+                [[Button(ctx.tr("Без комментария", "No comment"), "leads:status-skip")]]
+                if (change["target"] == "paused")
+                else []
+            )
+        else:
+            text = ctx.tr(
+                "Проверьте изменение. Клиент получит уведомление.",
+                "Review the change. The customer will be notified.",
+            )
+            text += "\n\n" + change["comment"]
+            rows = [
+                [Button(ctx.tr("Подтвердить изменение", "Confirm change"), "leads:status-confirm")]
+            ]
+        text = f"#{record['id']} · {target}\n\n" + text
+        return Screen(text, rows + [home_button(ctx)], back=f"leads:adminitem:{record['id']}")
+
     def action(self, ctx, action):
         command, _, value = action.partition(":")
+        if command in ("item", "adminitem"):
+            if not value.isdecimal():
+                raise DomainError("Заявка не найдена.", "Request not found.")
+            ctx.save(self.name, {})
+            return self.detail(ctx, int(value), command == "adminitem")
+        if command == "status":
+            lead_id, _, target = value.partition(":")
+            if not ctx.can_admin or not lead_id.isdecimal():
+                raise DomainError("Нет доступа.", "Access denied.")
+            record = self.service.get(ctx.tenant, int(lead_id))
+            if target not in TRANSITIONS[record["status"]]:
+                raise DomainError("Статус уже изменился.", "Status has changed.")
+            if target in ("paused", "rejected"):
+                ctx.save(
+                    self.name,
+                    {
+                        "status_change": {
+                            "id": int(lead_id),
+                            "target": target,
+                            "from": record["status"],
+                        }
+                    },
+                )
+                return self.status_screen(ctx)
+            self.service.change_status(ctx.tenant, int(lead_id), target, expected=record["status"])
+            return self.detail(ctx, int(lead_id), True)
+        if command in ("status-confirm", "status-skip"):
+            if not ctx.can_admin:
+                raise DomainError("Нет доступа.", "Access denied.")
+            draft = ctx.state(self.name)
+            change = draft.get("status_change")
+            if not change:
+                return self.listing(ctx, True)
+            if command == "status-skip" and change["target"] == "paused":
+                change["comment"] = ""
+                ctx.save(self.name, draft)
+                return self.status_screen(ctx)
+            if "comment" not in change:
+                return self.status_screen(ctx)
+            self.service.change_status(
+                ctx.tenant,
+                change["id"],
+                change["target"],
+                change["comment"],
+                expected=change["from"],
+            )
+            ctx.save(self.name, {})
+            return self.detail(ctx, change["id"], True)
         if command in ("mine", "admin"):
+            ctx.save(self.name, {})
             return self.listing(ctx, command == "admin")
         if command == "advance":
             if not ctx.can_admin or not value.isdecimal():
@@ -154,11 +287,7 @@ class Leads:
                 ctx.tr(f"Заявка #{lead_id} сохранена.", f"Request #{lead_id} saved."),
                 [
                     [Button(ctx.tr("Мои заявки", "My requests"), "leads:mine")],
-                    *(
-                        [[Button(ctx.tr("Кабинет администратора", "Admin view"), "leads:admin")]]
-                        if ctx.can_admin
-                        else []
-                    ),
+                    *([[Button(ctx.admin_label(), "leads:admin")]] if ctx.can_admin else []),
                     home_button(ctx),
                 ],
                 back="leads:menu",
@@ -169,6 +298,13 @@ class Leads:
         draft = ctx.state(self.name)
         if not draft:
             return self.start(ctx)
+        if "status_change" in draft:
+            if not ctx.can_admin:
+                raise DomainError("Нет доступа.", "Access denied.")
+            change = draft["status_change"]
+            change["comment"] = validate_comment(text, required=change["target"] == "rejected")
+            ctx.save(self.name, draft)
+            return self.status_screen(ctx)
         field = self.field(draft)
         if field in FIELDS:
             draft["_field"] = field

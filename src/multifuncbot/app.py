@@ -3,7 +3,7 @@
 import logging
 from dataclasses import replace
 
-from telegram import BotCommand, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import TelegramError
 from telegram.ext import (
     Application,
@@ -45,6 +45,7 @@ def build_application(settings: Settings) -> Application:
                 )
             except TelegramError:
                 LOGGER.warning("Unable to update the Telegram command menu")
+        LOGGER.info("Бот подключён к Telegram. Откройте чат и нажмите /start. Остановка: Ctrl+C.")
 
     application = Application.builder().token(settings.bot_token).post_init(commands).build()
     application.bot_data["router"] = router
@@ -55,17 +56,40 @@ def build_application(settings: Settings) -> Application:
             return
         for record in feature.service.due_reminders():
             language = db.language(record["owner_id"]) or settings.default_language
-            message = (
-                "Напоминание: запись начнётся в течение часа. /menu — мои записи."
-                if language == "ru"
-                else "Reminder: your appointment starts within an hour. /menu for appointments."
-            )
+            message = feature.reminder_text(record, language)
             try:
                 delivered = await context.bot.send_message(record["chat_id"], message)
                 ui.note_message(record["owner_id"], record["chat_id"], delivered.message_id)
                 feature.service.mark_reminded(record["id"])
             except TelegramError:
                 LOGGER.warning("Appointment reminder delivery failed")
+        for record in feature.service.due_feedback():
+            language = db.language(record["owner_id"]) or settings.default_language
+            text = (
+                f"⭐ Как прошёл визит #{record['id']}?\n"
+                "Оцените работу мастера и при желании оставьте комментарий."
+                if language == "ru"
+                else f"⭐ How was visit #{record['id']}?\n"
+                "Rate your visit and optionally leave a comment."
+            )
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "Оценить визит" if language == "ru" else "Rate visit",
+                            callback_data=f"notice:booking:review:{record['id']}",
+                        )
+                    ]
+                ]
+            )
+            try:
+                delivered = await context.bot.send_message(
+                    record["chat_id"], text, reply_markup=keyboard
+                )
+                ui.note_message(record["owner_id"], record["chat_id"], delivered.message_id)
+                feature.service.mark_feedback_requested(record["id"])
+            except TelegramError:
+                LOGGER.warning("Appointment feedback request delivery failed")
 
     if "booking" in router.features:
         application.job_queue.run_repeating(reminders, interval=60, first=10)
@@ -90,6 +114,14 @@ def build_application(settings: Settings) -> Application:
         user_id, chat_id = update.effective_user.id, update.effective_chat.id
         if update.callback_query:
             query = update.callback_query
+            if (query.data or "").startswith("notice:"):
+                try:
+                    await query.answer()
+                except TelegramError:
+                    LOGGER.info("Unable to acknowledge notification navigation")
+                screen = router.notice(user_id, chat_id, query.data)
+                await ui.render(context.bot, user_id, chat_id, screen)
+                return
             message_id = query.message.message_id if query.message else None
             action = ui.resolve(user_id, chat_id, message_id, query.data or "")
             try:
@@ -121,15 +153,15 @@ def build_application(settings: Settings) -> Application:
             elif command == "/back":
                 screen = router.action(user_id, chat_id, "back")
             elif command in ("/help", "/menu", "/cancel"):
-                screen = router.action(user_id, chat_id, "home")
+                screen = router.action(user_id, chat_id, "scenario")
             elif command.startswith("/"):
-                screen = router.action(user_id, chat_id, "home")
+                screen = router.action(user_id, chat_id, "scenario")
             else:
                 screen = router.text(user_id, chat_id, update.message.text)
         else:
             if update.message:
                 ui.note_message(user_id, chat_id, update.message.message_id)
-            screen = router.action(user_id, chat_id, "home")
+            screen = router.action(user_id, chat_id, "scenario")
         await ui.render(context.bot, user_id, chat_id, screen)
         if update.message and update.message.text:
             # Only remove text after the result is visible. Files sent by the user stay intact.
@@ -169,6 +201,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
     try:
         application = build_application(Settings.from_env())
     except ValueError as error:
