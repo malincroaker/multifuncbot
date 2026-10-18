@@ -83,3 +83,39 @@ def test_business_mode_never_creates_an_anonymous_identity(tmp_path):
     app = create_app(Settings(database_path=str(tmp_path / "db"), app_mode="business"))
     with TestClient(app, headers=HEADERS) as client:
         assert client.post("/api/session").status_code == 401
+
+
+def test_https_tunnel_preserves_origin_checks_and_secure_sessions(tmp_path):
+    public_url = "https://shop.example"
+    app = create_app(
+        Settings(database_path=str(tmp_path / "db"), mini_app_url=public_url)
+    )
+
+    async def tunnel(scope, receive, send):
+        if scope["type"] == "http":
+            scope = {**scope, "scheme": "http"}
+        await app(scope, receive, send)
+
+    with TestClient(tunnel, base_url=public_url, headers=HEADERS) as client:
+        response = client.post("/api/session", headers={"Origin": public_url})
+        assert response.status_code == 200
+        assert "Secure" in response.headers["set-cookie"]
+        assert client.put(
+            "/api/cart/items/mug", json={"quantity": 1}, headers={"Origin": public_url}
+        ).status_code == 200
+        assert client.get("/api/cart").json()["count"] == 1
+        assert client.post(
+            "/api/session", headers={"Origin": "https://evil.example"}
+        ).status_code == 403
+        assert client.post(
+            "/api/session", headers={"Origin": "http://shop.example"}
+        ).status_code == 403
+
+    with TestClient(app, headers=HEADERS) as local:
+        assert local.post(
+            "/api/session", headers={"Origin": "http://testserver"}
+        ).status_code == 200
+        assert local.post(
+            "/api/session",
+            headers={"Origin": public_url, "X-Forwarded-Host": "shop.example"},
+        ).status_code == 403

@@ -1,6 +1,7 @@
 """Optional Mini App server: `multifuncbot-web`. Bot-only installs do not import this."""
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -19,9 +20,14 @@ def create_app(settings=None):
 
     app = FastAPI(title="Multifuncbot Mini App", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.database_path = settings.database_path
+    public_url = urlsplit(settings.mini_app_url)
 
     @app.middleware("http")
     async def security(request: Request, call_next):
+        # HTTPS tunnels may forward plain HTTP without standard proxy headers.
+        # Only restore HTTPS for the explicitly configured public authority.
+        if public_url.netloc and request.headers.get("host") == public_url.netloc:
+            request.scope["scheme"] = public_url.scheme
         if request.method in ("POST", "PUT", "DELETE", "PATCH"):
             origin = request.headers.get("origin")
             expected = str(request.base_url).rstrip("/")
