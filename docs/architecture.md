@@ -4,6 +4,9 @@
 
 One Python application, explicit feature registration, SQLite, and an optional FastAPI process.
 The Telegram transport renders feature screens; business services do not import Telegram.
+`telegram_ui.py` owns editing, callback revisions and input cleanup. Feature screens declare
+an optional `back` action and a safe `refresh` action; the router renders Back consistently
+and saves a view snapshot without replaying business mutations. See [chat navigation](chat-navigation.md).
 Feature modules own schemas, flows, copy and tests. Modules never import each other.
 The shop owns its API and Mini App assets. Installing the bot does not require the web extra.
 

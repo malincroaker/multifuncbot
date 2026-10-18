@@ -2,10 +2,13 @@
 
 ## Verified locally
 
-- 49 pytest cases on Python 3.13: booking conflicts under concurrent requests, tenant/user
+- 67 pytest cases on Python 3.13: booking conflicts under concurrent requests, tenant/user
   isolation, ownership and admin checks, persistent guide progress, form review, idempotent
   checkout, frozen order totals, payment transitions, Telegram HMAC age/signature validation,
   browser sessions, CSRF rejection, outbox persistence and Telegram transport rendering with mocks.
+- Chat navigation checks: persistent single-screen delivery, deleted-screen/PDF recovery,
+  duplicate/stale callback rejection, consumption before a delivery timeout, processed-input
+  cleanup, field backtracking, safe language changes and navigation below retained notifications.
 - Physical module extraction: a temporary copy containing only the guide and shared core runs
   without the booking/leads/shop folders and without importing FastAPI.
 - Ruff checks and JavaScript syntax check pass; pip reports no broken requirements.
@@ -21,8 +24,9 @@ Current checks are visible in the repository's Actions tab; do not treat this no
 
 ## Limits
 
-- A new BOT_TOKEN has not been supplied: no claim of a live Telegram/BotFather test or real
-  delivery of bot messages, PDFs, admin notifications or reminders is made.
+- A bot token was subsequently configured locally by the owner. Navigation checks still use
+  fake Telegram updates and responses: no claim of live Telegram visual verification or real
+  delivery of bot messages, PDFs, admin notifications or reminders is made here.
 - No public HTTPS hosting has been configured; the shop is verified as a local browser app,
   not as a live Telegram WebView. Telegram integration uses the documented signed-initData flow.
 - No payment-provider account/keys are configured. No money moves; all payment states are simulated.

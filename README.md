@@ -96,7 +96,8 @@ Business mode still uses demo products and simulated payments; it is not a produ
 ## Commands and persistence
 
 - `/start`, `/menu`, `/cancel`, `/help`: open the scenario menu, or the configured default scenario.
-- `/language`: change language while keeping the current draft or guide step.
+- `/back` and Back buttons: return to the previous step, preserving existing form answers.
+- `/language`: change language while keeping the current view, draft or guide step.
 - Leaving a scenario discards its unfinished form. Guide progress and confirmed records remain.
 - SQLite stores language, progress, bookings, leads, carts, orders and notification delivery state.
 - Appointment reminders run once per minute for confirmed appointments starting within an hour.
@@ -105,11 +106,23 @@ Business mode still uses demo products and simulated payments; it is not a produ
 - Business notifications use a persisted outbox, polled every 15 seconds with up to five attempts.
   Only one bot process should consume updates and notifications.
 
+Navigation edits one persistent bot message. Processed text replies and commands are deleted
+only after the next screen is displayed. Review screens show answers before submission, and
+Back lets users replace or keep existing answers. User attachments are retained. The PDF is
+sent separately and reused on repeated requests; a deleted PDF can be requested again.
+Notifications and reminders remain separate; the next navigation screen moves below them.
+Stale or repeated callbacks cannot execute the previous screen's action.
+
+Restart the bot process after updating the code. Earlier untracked chat history is not bulk-deleted.
+Telegram may reject deletion of individual messages; navigation continues regardless.
+See [chat navigation](docs/chat-navigation.md) for delivery and recovery details.
+
 ## Structure and client reuse
 
 ```text
 src/multifuncbot/
   app.py                     Telegram transport
+  telegram_ui.py             Persistent screen delivery and input cleanup
   web.py                     Optional web server
   core/                      Configuration, storage, routing, authentication, notifications
   modules/
