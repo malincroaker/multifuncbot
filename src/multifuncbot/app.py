@@ -45,6 +45,26 @@ def build_application(settings: Settings) -> Application:
     application = Application.builder().token(settings.bot_token).build()
     application.bot_data["router"] = router
 
+    async def reminders(context):
+        feature = router.features.get("booking")
+        if not feature:
+            return
+        for record in feature.service.due_reminders():
+            language = db.language(record["owner_id"]) or settings.default_language
+            message = (
+                "Напоминание: запись начнётся в течение часа. /menu — мои записи."
+                if language == "ru"
+                else "Reminder: your appointment starts within an hour. /menu for appointments."
+            )
+            try:
+                await context.bot.send_message(record["chat_id"], message)
+                feature.service.mark_reminded(record["id"])
+            except TelegramError:
+                LOGGER.warning("Appointment reminder delivery failed")
+
+    if "booking" in router.features:
+        application.job_queue.run_repeating(reminders, interval=60, first=10)
+
     async def handle(update: Update, context):
         if not update.effective_user or not update.effective_chat:
             return
