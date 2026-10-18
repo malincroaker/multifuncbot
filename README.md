@@ -12,8 +12,8 @@ Select the same modules to build a standalone client bot. Russian and English in
 | Module | Customer flow | Administration |
 | --- | --- | --- |
 | `guide` | Three-step Stepwise guide, saved progress, bilingual PDF checklist | Configurable admin contact |
-| `booking` | Service, specialist, date, free slot, confirmation and cancellation | Approve/reject, shared calendar in business mode, reminders |
-| `leads` | Request, name, contact, review and submission | New → in progress → complete |
+| `booking` | Booking, readable dates/timezone, reminder and post-visit rating | Approve/reject/cancel, shared calendar in business mode, review visibility |
+| `leads` | Request, review, status details and customer updates | Work, pause, complete, decline with a reason, and reopen |
 | `shop` | Chat catalogue or Mini App, persistent cart, checkout and order history | Order details and notifications in business mode |
 
 The Mini App includes search, category filters, product details, quantity controls, pickup or
@@ -71,6 +71,8 @@ read Telegram users' orders. The app does not accept a submitted user ID or prod
 
 No hosting account, public HTTPS endpoint or Telegram bot identity has been provisioned by this repository.
 For a local demonstration you can use the chat catalogue without configuring a Mini App URL.
+An explanatory Mini App entry remains visible when its URL is not configured.
+See [access options and first Telegram check](docs/miniapp-access.md).
 
 ## Configuration
 
@@ -86,6 +88,8 @@ For a local demonstration you can use the chat catalogue without configuring a M
 | `MINI_APP_URL` | empty | HTTPS URL enabling the Mini App button |
 | `ALLOW_BROWSER_DEMO` | `true` | Browser preview, available only in showcase mode |
 | `ADMIN_CONTACT_URL` | empty | Optional `https://t.me/username` contact in the guide |
+| `STUDIO_CONTACT_URL` | empty | Optional studio contact for questions to a specialist |
+| `REVIEW_DELAY_HOURS` | `2` | Request a review this many hours after the start; valid range 1–168 |
 | `HOST`, `PORT` | `127.0.0.1`, `8000` | Web bind address; use a reverse proxy for public hosting |
 | `PAYMENT_PROVIDER` | `demo` | Only the explicit simulator is supported |
 
@@ -95,7 +99,9 @@ Business mode still uses demo products and simulated payments; it is not a produ
 
 ## Commands and persistence
 
-- `/start`, `/menu`, `/cancel`, `/help`: open the scenario menu, or the configured default scenario.
+- `/start`: open the scenario selector, or configured client default.
+- `/menu`, `/cancel`, `/help`: open the current scenario's introduction.
+- All scenarios appears only at scenario introductions; deeper screens link to their local menu.
 - `/back` and Back buttons: return to the previous step, preserving existing form answers.
 - `/language`: change language while keeping the current view, draft or guide step.
 - Leaving a scenario discards its unfinished form. Guide progress and confirmed records remain.
@@ -105,6 +111,17 @@ Business mode still uses demo products and simulated payments; it is not a produ
   the delivery flag can cause a duplicate reminder.
 - Business notifications use a persisted outbox, polled every 15 seconds with up to five attempts.
   Only one bot process should consume updates and notifications.
+
+Confirmed visits receive a review request after `REVIEW_DELAY_HOURS` (two hours by default).
+The button verifies ownership and elapsed time; ratings and optional comments persist in SQLite.
+Showcase visitors can try a sample review immediately from Studio → Reminders & reviews → Preview.
+The sample does not create appointments. Timing alone does not verify actual attendance.
+
+Each scenario has a business desk rather than a global role switch. In showcase mode it controls
+only the visitor's data, and status updates arrive to the same user as labelled demo customer
+notifications. In business mode only configured admins can manage records; customers receive
+their own updates. Lead decline requires a reason; pause, reopen and return-to-new preserve history.
+Routine scheduler INFO logs are hidden; warnings and failures remain visible.
 
 Navigation edits one persistent bot message. Processed text replies and commands are deleted
 only after the next screen is displayed. Review screens show answers before submission, and

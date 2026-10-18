@@ -30,7 +30,11 @@ This is a UI guard in addition to service authorization and checkout idempotency
 | Guide contact | Guide introduction |
 | Language / validation error | Saved previous view, without replaying its action |
 
-`Screen.back` declares the target, and the router adds a button above the global home link.
+`Screen.back` declares the target, and the router adds a button above the local scenario menu.
+The All scenarios link exists only on scenario introductions, and is omitted in extracted client
+bots with `DEFAULT_MODULE`. `/menu` returns to the current scenario; `/start` opens the selector.
+Scenario introductions use `scenario_exit_button`, while deeper screens use `home_button` to
+return to `module:menu`. A matching Back target is not rendered twice.
 `/back` uses the same target. `Screen.refresh` is a safe view-rendering action used to regenerate
 the current section after a language change. Never put creation, payment, status changes or
 other mutations in `refresh`. Form cursors are separate from answers, so returning to a field
@@ -44,6 +48,10 @@ does not delete it. Menu exits discard unfinished forms; persistent records and 
   If it was deleted, the bot sends it again; switching PDF language replaces the tracked attachment.
 - Reminders and business notifications remain separate. Their IDs are recorded separately;
   the next navigation screen is sent below them, and the previous navigation screen is retired.
+- A retained review notice uses a narrowly allowed `notice:booking:review:<id>` navigation action,
+  not an expired UI callback. The router only permits a module's declared `notice_actions`,
+  and the feature checks ownership and elapsed time before opening the review form. Reopening
+  the same notice preserves a pending review; no business mutation is exposed through this path.
 - A missing/uneditable screen gets a replacement. A timeout, rate limit or unexpected API error
   does not trigger a fallback send, since the original edit may have succeeded.
 - If an old screen cannot be deleted, the bot attempts to remove its keyboard. Callback validation

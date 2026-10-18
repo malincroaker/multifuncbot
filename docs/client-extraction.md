@@ -7,6 +7,8 @@ ENABLED_MODULES=booking
 DEFAULT_MODULE=booking
 APP_MODE=business
 ADMIN_IDS=123456789
+STUDIO_CONTACT_URL=https://t.me/replace_with_studio_contact
+REVIEW_DELAY_HOURS=2
 ALLOW_BROWSER_DEMO=false
 DATABASE_PATH=data/studio.sqlite3
 BOT_TOKEN=replace-locally-with-a-new-bot-token
@@ -23,7 +25,8 @@ BOT_TOKEN=replace-locally-with-a-new-bot-token
 6. Keep corresponding names out of `ENABLED_MODULES`; removing a feature folder while leaving it
    enabled is a configuration error. Run the remaining tests before delivery.
 7. Ask the admin to start the bot, then verify booking approval, cancellation, notifications
-   and reminders using a separate customer account.
+   and reminders using a separate customer account. Verify review requests after the configured
+   delay and that submitted ratings are visible in the business desk.
 
 For shop-only delivery, use `ENABLED_MODULES=shop`, `DEFAULT_MODULE=shop`, install `.[web]`,
 configure HTTPS, and keep the shop assets plus its payment adapter.
@@ -47,6 +50,9 @@ A feature exports `create(db, settings)` in its `feature.py`, and implements `na
 `start`, `action` and `text`. It returns transport-neutral `Screen`/`Button` objects. The module
 owns its SQL schema, service methods, bilingual copy and tests. Register its name explicitly in
 `core/config.py`; the registry loads only configured names. Features must not import each other.
+Set `menu_names=(ru, en)` for the local menu label. Use `scenario_exit_button` at introductions
+and `home_button` inside flows. Retained notifications may expose only navigation actions
+explicitly listed in `notice_actions`; these must check ownership and never apply a mutation.
 
 By default the router clears a feature's unfinished conversation state when leaving it.
 Set `retain_state_on_exit=True` only for persistent progress such as the guide. Confirmed

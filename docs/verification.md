@@ -2,13 +2,19 @@
 
 ## Verified locally
 
-- 67 pytest cases on Python 3.13: booking conflicts under concurrent requests, tenant/user
+- 87 pytest cases on Python 3.13: booking conflicts under concurrent requests, tenant/user
   isolation, ownership and admin checks, persistent guide progress, form review, idempotent
   checkout, frozen order totals, payment transitions, Telegram HMAC age/signature validation,
   browser sessions, CSRF rejection, outbox persistence and Telegram transport rendering with mocks.
 - Chat navigation checks: persistent single-screen delivery, deleted-screen/PDF recovery,
   duplicate/stale callback rejection, consumption before a delivery timeout, processed-input
   cleanup, field backtracking, safe language changes and navigation below retained notifications.
+- Scenario refinements: local menu hierarchy, Stepwise progress, readable dates, Mini App setup
+  visibility, symmetric cart controls, reversible lead statuses with required decline reasons,
+  customer ownership, history, stale-decision protection, and notification contents.
+- Booking follow-ups: simulated time tests verify reminder/review job delivery, requested flags,
+  ineligible/rejected visits, rating ownership, idempotent submission, retained-notice safety,
+  and preservation of existing booking/lead records when new tables are initialized.
 - Physical module extraction: a temporary copy containing only the guide and shared core runs
   without the booking/leads/shop folders and without importing FastAPI.
 - Ruff checks and JavaScript syntax check pass; pip reports no broken requirements.
