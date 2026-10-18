@@ -44,30 +44,51 @@ class Leads:
                 "review your answers and submit your request.",
             ),
             rows + [home_button(ctx)],
+            back="home",
+            refresh="leads:menu",
         )
 
     def flow(self, ctx):
         draft = ctx.state(self.name)
         if not draft:
             return self.start(ctx)
-        for field, prompt in FIELDS.items():
-            if field not in draft:
-                return Screen(
-                    ctx.tr(*prompt),
-                    [
-                        [Button(ctx.tr("Отменить заполнение", "Cancel draft"), "leads:cancel")],
-                        home_button(ctx),
-                    ],
+        field = self.field(draft)
+        if field != "review":
+            text = ctx.tr(*FIELDS[field])
+            rows = []
+            if field in draft:
+                text += ctx.tr("\n\nТекущий ответ: ", "\n\nCurrent answer: ") + draft[field]
+                rows.append(
+                    [Button(ctx.tr("Оставить этот ответ", "Keep this answer"), "leads:keep")]
                 )
+            return Screen(
+                text,
+                rows
+                + [
+                    [Button(ctx.tr("Отменить заполнение", "Cancel draft"), "leads:cancel")],
+                    home_button(ctx),
+                ],
+                back="leads:back",
+            )
         return Screen(
             ctx.tr("Проверьте заявку:\n\n", "Review your request:\n\n")
             + f"{draft['request']}\n{draft['name']}\n{draft['contact']}",
             [
                 [Button(ctx.tr("Отправить заявку", "Submit request"), "leads:confirm")],
-                [Button(ctx.tr("Исправить ответы", "Edit answers"), "leads:new")],
+                [Button(ctx.tr("Исправить ответы", "Edit answers"), "leads:edit")],
                 home_button(ctx),
             ],
+            back="leads:back",
         )
+
+    @staticmethod
+    def field(draft):
+        return draft.get("_field") or next((key for key in FIELDS if key not in draft), "review")
+
+    def advance_field(self, ctx, draft):
+        fields = (*FIELDS, "review")
+        draft["_field"] = fields[min(fields.index(self.field(draft)) + 1, len(fields) - 1)]
+        ctx.save(self.name, draft)
 
     def listing(self, ctx, admin=False):
         if admin and not ctx.can_admin:
@@ -87,7 +108,9 @@ class Leads:
                 rows.append([Button(f"{label} #{row['id']}", f"leads:advance:{row['id']}")])
         return Screen(
             "\n\n".join(lines) or ctx.tr("Заявок пока нет.", "No requests yet."),
-            rows + [[Button(ctx.tr("Назад", "Back"), "leads:menu")], home_button(ctx)],
+            rows + [home_button(ctx)],
+            back="leads:menu",
+            refresh="leads:admin" if admin else "leads:mine",
         )
 
     def action(self, ctx, action):
@@ -99,13 +122,28 @@ class Leads:
                 raise DomainError("Нет доступа.", "Access denied.")
             self.service.advance(ctx.tenant, int(value))
             return self.listing(ctx, True)
-        if command == "menu":
-            return self.start(ctx)
-        if command == "cancel":
+        if command in ("menu", "cancel"):
             ctx.save(self.name, {})
             return self.start(ctx)
         if command == "new":
-            ctx.save(self.name, {"active": True})
+            ctx.save(self.name, {"active": True, "_field": "request"})
+        elif command in ("back", "keep", "edit"):
+            draft = ctx.state(self.name)
+            if not draft:
+                return self.start(ctx)
+            field = self.field(draft)
+            if command == "back":
+                fields = (*FIELDS, "review")
+                if field == fields[0]:
+                    ctx.save(self.name, {})
+                    return self.start(ctx)
+                draft["_field"] = fields[fields.index(field) - 1]
+                ctx.save(self.name, draft)
+            elif command == "edit":
+                draft["_field"] = "request"
+                ctx.save(self.name, draft)
+            elif field in draft:
+                self.advance_field(ctx, draft)
         elif command == "confirm":
             draft = ctx.state(self.name)
             if not all(field in draft for field in FIELDS):
@@ -123,6 +161,7 @@ class Leads:
                     ),
                     home_button(ctx),
                 ],
+                back="leads:menu",
             )
         return self.flow(ctx)
 
@@ -130,11 +169,11 @@ class Leads:
         draft = ctx.state(self.name)
         if not draft:
             return self.start(ctx)
-        for field in FIELDS:
-            if field not in draft:
-                draft[field] = validate_field(field, text)
-                ctx.save(self.name, draft)
-                break
+        field = self.field(draft)
+        if field in FIELDS:
+            draft["_field"] = field
+            draft[field] = validate_field(field, text)
+            self.advance_field(ctx, draft)
         return self.flow(ctx)
 
 

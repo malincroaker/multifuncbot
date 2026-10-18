@@ -18,9 +18,13 @@ class Button:
 
 @dataclass
 class Screen:
+    """A view plus navigation targets; refresh must never repeat a business mutation."""
+
     text: str
     rows: list[list[Button]] = field(default_factory=list)
     document: Path | None = None
+    back: str = ""
+    refresh: str = ""
 
 
 @dataclass

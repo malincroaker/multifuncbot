@@ -93,7 +93,11 @@ def test_telegram_transport_renders_start_without_network(tmp_path):
             1, None, Chat(1, "private"), from_user=User(1, "Alex", False), text="/start"
         ),
     )
-    bot = SimpleNamespace(send_message=AsyncMock(), send_document=AsyncMock())
+    bot = SimpleNamespace(
+        send_message=AsyncMock(return_value=SimpleNamespace(message_id=100)),
+        send_document=AsyncMock(),
+        delete_message=AsyncMock(),
+    )
     asyncio.run(app.handlers[0][0].callback(update, SimpleNamespace(bot=bot)))
     assert "Choose your language" in bot.send_message.call_args.args[1]
 
@@ -106,6 +110,10 @@ def test_whitespace_message_does_not_crash_the_transport(tmp_path):
         1,
         message=Message(1, None, Chat(1, "private"), from_user=User(1, "Alex", False), text="   "),
     )
-    bot = SimpleNamespace(send_message=AsyncMock(), send_document=AsyncMock())
+    bot = SimpleNamespace(
+        send_message=AsyncMock(return_value=SimpleNamespace(message_id=100)),
+        send_document=AsyncMock(),
+        delete_message=AsyncMock(),
+    )
     asyncio.run(app.handlers[0][0].callback(update, SimpleNamespace(bot=bot)))
     bot.send_message.assert_awaited_once()

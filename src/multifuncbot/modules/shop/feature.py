@@ -53,6 +53,8 @@ class Shop:
                 "Payments are simulated: no real money is charged.",
             ),
             rows + [home_button(ctx)],
+            back="home",
+            refresh="shop:menu",
         )
 
     def catalog(self, ctx):
@@ -68,6 +70,8 @@ class Shop:
                 for key, product in PRODUCTS.items()
             ]
             + [[Button(ctx.tr("Открыть корзину", "Open cart"), "shop:cart")], home_button(ctx)],
+            back="shop:menu",
+            refresh="shop:catalog",
         )
 
     def cart(self, ctx):
@@ -96,15 +100,18 @@ class Shop:
         return Screen(
             text,
             rows + [[Button(ctx.tr("Каталог", "Catalogue"), "shop:catalog")], home_button(ctx)],
+            back="shop:menu",
+            refresh="shop:cart",
         )
 
     def checkout_flow(self, ctx):
         draft = ctx.state(self.name)
         if not draft:
             return self.start(ctx)
-        if "customer_name" not in draft:
+        field = self.field(draft)
+        if field == "customer_name":
             text = ctx.tr("Как к вам обращаться?", "What is your name?")
-        elif "contact" not in draft:
+        elif field == "contact":
             text = ctx.tr(
                 "Укажите телефон, email или @username. Можно вымышленные для демо.",
                 "Enter a phone, email or @username. Fictional details are fine for the demo.",
@@ -118,8 +125,24 @@ class Shop:
                     [Button(ctx.tr("Создать демо-заказ", "Place demo order"), "shop:place")],
                     home_button(ctx),
                 ],
+                back="shop:back",
             )
-        return Screen(text, [home_button(ctx)])
+        rows = []
+        if field in draft:
+            text += ctx.tr("\n\nТекущий ответ: ", "\n\nCurrent answer: ") + draft[field]
+            rows.append([Button(ctx.tr("Оставить этот ответ", "Keep this answer"), "shop:keep")])
+        return Screen(text, rows + [home_button(ctx)], back="shop:back")
+
+    @staticmethod
+    def field(draft):
+        return draft.get("_field") or next(
+            (key for key in ("customer_name", "contact") if key not in draft), "review"
+        )
+
+    def advance_field(self, ctx, draft):
+        fields = ("customer_name", "contact", "review")
+        draft["_field"] = fields[min(fields.index(self.field(draft)) + 1, len(fields) - 1)]
+        ctx.save(self.name, draft)
 
     def order_screen(self, ctx, order, *, admin=False):
         text = f"#{order['id'][:8]} · {order['total'] // 100} ₽\n"
@@ -142,11 +165,29 @@ class Shop:
                 rows.append([Button(ctx.tr(label, en), f"shop:pay:{order['id']}:{outcome}")])
         return Screen(
             text,
-            rows + [[Button(ctx.tr("Мои заказы", "My orders"), "shop:orders")], home_button(ctx)],
+            rows + [home_button(ctx)],
+            back="shop:admin" if admin else "shop:orders",
+            refresh=f"shop:{'adminorder' if admin else 'order'}:{order['id']}",
         )
 
     def action(self, ctx, action):
         command, _, value = action.partition(":")
+        if command in ("menu", "catalog", "cart", "orders", "admin"):
+            ctx.save(self.name, {})
+        if command in ("back", "keep"):
+            draft = ctx.state(self.name)
+            if not draft:
+                return self.cart(ctx)
+            field = self.field(draft)
+            if command == "back":
+                if field == "customer_name":
+                    ctx.save(self.name, {})
+                    return self.cart(ctx)
+                draft["_field"] = "contact" if field == "review" else "customer_name"
+                ctx.save(self.name, draft)
+            elif field in draft:
+                self.advance_field(ctx, draft)
+            return self.checkout_flow(ctx)
         if command == "catalog":
             return self.catalog(ctx)
         if command in ("add", "remove"):
@@ -161,7 +202,7 @@ class Shop:
         if command == "checkout":
             if not self.service.cart(ctx.tenant, ctx.user_id)["count"]:
                 return self.cart(ctx)
-            ctx.save(self.name, {"request_key": uuid4().hex})
+            ctx.save(self.name, {"request_key": uuid4().hex, "_field": "customer_name"})
             return self.checkout_flow(ctx)
         if command == "place":
             draft = ctx.state(self.name)
@@ -209,6 +250,8 @@ class Shop:
                     for order in orders
                 ]
                 + [home_button(ctx)],
+                back="shop:menu",
+                refresh=f"shop:{command}",
             )
         if command == "resume" and ctx.state(self.name):
             return self.checkout_flow(ctx)
@@ -218,11 +261,11 @@ class Shop:
         draft = ctx.state(self.name)
         if not draft:
             return self.start(ctx)
-        for field in ("customer_name", "contact"):
-            if field not in draft:
-                draft[field] = customer_field(field, text)
-                ctx.save(self.name, draft)
-                break
+        field = self.field(draft)
+        if field in ("customer_name", "contact"):
+            draft["_field"] = field
+            draft[field] = customer_field(field, text)
+            self.advance_field(ctx, draft)
         return self.checkout_flow(ctx)
 
 

@@ -10,6 +10,7 @@ STATUSES = {
     "rejected": ("Отклонена", "Rejected"),
     "cancelled": ("Отменена", "Cancelled"),
 }
+STAGES = ("service", "specialist", "day", "starts_at", "review")
 
 
 class Booking:
@@ -37,13 +38,18 @@ class Booking:
             )
             + ctx.settings.timezone,
             rows + [home_button(ctx)],
+            back="home",
+            refresh="booking:menu",
         )
 
     def flow(self, ctx):
         draft = ctx.state(self.name)
         if not draft:
             return self.start(ctx)
-        if "service" not in draft:
+        stage = draft.get("_step") or next(
+            (key for key in STAGES[:-1] if key not in draft), "review"
+        )
+        if stage == "service":
             return Screen(
                 ctx.tr(
                     "Выберите услугу. Цены демонстрационные.",
@@ -54,8 +60,9 @@ class Booking:
                     for key, (ru, en, price) in SERVICES.items()
                 ]
                 + [home_button(ctx)],
+                back="booking:back",
             )
-        if "specialist" not in draft:
+        if stage == "specialist":
             return Screen(
                 ctx.tr("Выберите специалиста:", "Choose a specialist:"),
                 [
@@ -63,14 +70,16 @@ class Booking:
                     for key, names in SPECIALISTS.items()
                 ]
                 + [home_button(ctx)],
+                back="booking:back",
             )
-        if "day" not in draft:
+        if stage == "day":
             return Screen(
                 ctx.tr("Выберите дату:", "Choose a date:"),
                 [[Button(day, f"booking:day:{day}")] for day in self.service.days()]
                 + [home_button(ctx)],
+                back="booking:back",
             )
-        if "starts_at" not in draft:
+        if stage == "starts_at":
             slots = self.service.slots(ctx.tenant, draft["specialist"], draft["day"])
             return Screen(
                 ctx.tr("Выберите время:", "Choose a time:")
@@ -93,6 +102,7 @@ class Booking:
                     [Button(ctx.tr("Другая дата", "Another date"), "booking:dates")],
                     home_button(ctx),
                 ],
+                back="booking:back",
             )
         service = SERVICES[draft["service"]]
         specialist = SPECIALISTS[draft["specialist"]]
@@ -110,6 +120,7 @@ class Booking:
                 [Button(ctx.tr("Начать заново", "Start again"), "booking:new")],
                 home_button(ctx),
             ],
+            back="booking:back",
         )
 
     def listing(self, ctx, admin=False):
@@ -156,12 +167,16 @@ class Booking:
         if not records:
             text += ctx.tr("\n\nЗаписей пока нет.", "\n\nNo appointments yet.")
         return Screen(
-            text, rows + [[Button(ctx.tr("Назад", "Back"), "booking:menu")], home_button(ctx)]
+            text,
+            rows + [home_button(ctx)],
+            back="booking:menu",
+            refresh="booking:admin" if admin else "booking:mine",
         )
 
     def action(self, ctx: Context, action: str):
         command, _, value = action.partition(":")
         if command == "menu":
+            ctx.save(self.name, {})
             return self.start(ctx)
         if command in ("mine", "admin"):
             return self.listing(ctx, command == "admin")
@@ -181,21 +196,36 @@ class Booking:
             return self.listing(ctx, is_admin)
         draft = ctx.state(self.name)
         if command == "new":
-            draft = {"active": True}
+            draft = {"active": True, "_step": "service"}
+        elif command == "back":
+            stage = draft.get("_step") or next(
+                (key for key in STAGES[:-1] if key not in draft), "review"
+            )
+            if not draft or stage == "service":
+                ctx.save(self.name, {})
+                return self.start(ctx)
+            draft["_step"] = STAGES[STAGES.index(stage) - 1]
         elif command == "service" and value in SERVICES and draft:
-            draft = {"active": True, "service": value}
+            if value != draft.get("service"):
+                draft = {"active": True, "service": value}
+            draft["_step"] = "specialist"
         elif command == "specialist" and value in SPECIALISTS and "service" in draft:
-            draft = {"active": True, "service": draft["service"], "specialist": value}
+            if value != draft.get("specialist"):
+                draft = {"active": True, "service": draft["service"], "specialist": value}
+            draft["_step"] = "day"
         elif command == "day" and "specialist" in draft and value in self.service.days():
             draft.pop("starts_at", None)
             draft["day"] = value
+            draft["_step"] = "starts_at"
         elif command == "dates":
             draft.pop("day", None)
             draft.pop("starts_at", None)
+            draft["_step"] = "day"
         elif command == "slot" and "day" in draft:
             if value not in self.service.slots(ctx.tenant, draft["specialist"], draft["day"]):
                 raise DomainError("Время недоступно. Выберите другое.", "Slot unavailable.")
             draft["starts_at"] = value
+            draft["_step"] = "review"
         elif command == "confirm" and "starts_at" in draft:
             booking_id = self.service.book(
                 ctx.tenant,
@@ -222,6 +252,7 @@ class Booking:
                     ),
                     home_button(ctx),
                 ],
+                back="booking:menu",
             )
         ctx.save(self.name, draft)
         return self.flow(ctx)

@@ -31,6 +31,8 @@ class Guide:
                 [Button(ctx.tr("Связь с администратором", "Contact admin"), "guide:contact")],
                 home_button(ctx),
             ],
+            back="home",
+            refresh="guide:menu",
         )
 
     def step(self, ctx: Context) -> Screen:
@@ -48,6 +50,7 @@ class Guide:
                     [Button(ctx.tr("Начать заново", "Start again"), "guide:new")],
                     home_button(ctx),
                 ],
+                back="guide:back",
             )
         return Screen(
             ctx.tr(f"Шаг {index + 1} из 3\n\n", f"Step {index + 1} of 3\n\n")
@@ -60,9 +63,12 @@ class Guide:
                 [Button(ctx.tr("Скачать PDF", "Download PDF"), "guide:pdf")],
                 home_button(ctx),
             ],
+            back="guide:back",
         )
 
     def action(self, ctx: Context, action: str) -> Screen:
+        if action == "menu":
+            return self.start(ctx)
         if action == "new":
             ctx.save(self.name, {"step": 0})
         elif action in ("next", "back"):
@@ -74,7 +80,11 @@ class Guide:
                     self.name, {"step": min(3, max(0, index + (1 if action == "next" else -1)))}
                 )
         elif action == "pdf":
-            screen = self.step(ctx)
+            screen = (
+                self.start(ctx)
+                if ctx.state("screen").get("refresh") == "guide:menu"
+                else self.step(ctx)
+            )
             filename = "checklist_ru.pdf" if ctx.language == "ru" else "checklist.pdf"
             screen.document = Path(__file__).parent / "files" / filename
             return screen
@@ -91,6 +101,8 @@ class Guide:
                         ],
                         home_button(ctx),
                     ],
+                    back="guide:menu",
+                    refresh="guide:contact",
                 )
             return Screen(
                 ctx.tr(
@@ -98,6 +110,8 @@ class Guide:
                     "This is a demo. An administrator contact is not configured.",
                 ),
                 [home_button(ctx)],
+                back="guide:menu",
+                refresh="guide:contact",
             )
         return self.step(ctx)
 
