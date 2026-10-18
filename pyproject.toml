@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multifuncbot"
+version = "0.1.0"
+description = "A modular Telegram portfolio bot with booking, guides, leads and a shop Mini App."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "python-telegram-bot[job-queue]==22.8",
+  "python-dotenv>=1.1,<2",
+  "tzdata>=2025.2; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+web = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1"]
+dev = ["pytest>=8,<10", "ruff>=0.11,<1", "httpx>=0.28,<0.29"]
+
+[project.scripts]
+multifuncbot = "multifuncbot.app:main"
+multifuncbot-web = "multifuncbot.web:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"multifuncbot.modules.guide" = ["files/*.pdf"]
+"multifuncbot.modules.shop" = ["static/*", "static/images/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
